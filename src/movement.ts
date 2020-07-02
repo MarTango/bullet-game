@@ -3,10 +3,6 @@ import { Entity, Bullet, Msg } from "./index";
 export default {
   afterKeysPressed: ({ board, keysPressed, ...rest }: Msg): Msg => {
     const v = 0.2;
-
-    /**
-     * Map from key to partial Entity
-     */
     const mapping: { [s: string]: Partial<Entity> } = {
       w: { vy: v },
       a: { vx: -v },
@@ -18,7 +14,6 @@ export default {
     const keys: (keyof typeof mapping)[] = Array.from(keysPressed).filter(
       (k) => k in mapping
     );
-
     // @ts-ignore
     const players: Entity[] = board.entities
       .filter((e) => e.id)
