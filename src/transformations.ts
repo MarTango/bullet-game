@@ -1,27 +1,5 @@
 import { Msg, Entity } from "./types";
 
-export function afterGravity({ dt, board, ...msg }: Msg): Msg {
-  const ppl = board.entities.filter((e) => e.id);
-  const bullets = board.entities.filter((e) => !e.id);
-
-  const g = 0.000981;
-
-  return {
-    ...msg,
-    dt,
-    board: {
-      ...board,
-      entities: [
-        ...ppl,
-        ...bullets.map((e) => ({
-          ...e,
-          vy: e.vy - g * dt,
-        })),
-      ],
-    },
-  };
-}
-
 export function afterTimeStep({ dt = 0, board, ...msg }: Msg): Msg {
   return {
     ...msg,
