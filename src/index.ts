@@ -231,11 +231,6 @@ document
       });
     };
 
-    sock.on("icecandidate", (c: string) => {
-      console.log("Remote got candidate");
-      pc.addIceCandidate(JSON.parse(c));
-    });
-
     console.log("Remote listening for offer");
     sock.on("offer", async (offer: string) => {
       console.log("Remote got offer");
