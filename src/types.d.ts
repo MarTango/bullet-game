@@ -4,7 +4,7 @@ export interface State {
 }
 
 export interface Entity {
-  id?: number;
+  id?: string;
   r: number;
   x: number;
   y: number;
@@ -14,13 +14,16 @@ export interface Entity {
 }
 
 export interface Click {
+  entityId: string;
   x: number;
   y: number;
 }
 
+export type Keys = { [id: string]: Set<number> };
+
 export interface Msg {
   board: State;
   dt?: number;
-  keysPressed?: Set<string>;
-  click?: Click;
+  keys: Keys;
+  clicks: Click[];
 }

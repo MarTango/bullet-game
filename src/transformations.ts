@@ -1,4 +1,5 @@
 import { Msg, Entity } from "./types";
+import { keycodes } from "./controls";
 
 export function afterTimeStep({ dt = 0, board, ...msg }: Msg): Msg {
   return {
@@ -51,71 +52,82 @@ export function afterBouncing({ board, ...msg }: Msg): Msg {
   };
 }
 
-export function afterKeysPressed({ board, keysPressed, ...rest }: Msg): Msg {
-  const v = 0.2;
-  const mapping: { [s: string]: Partial<Entity> } = {
-    w: { vy: v },
-    a: { vx: -v },
-    s: { vy: -v },
-    d: { vx: v },
+const v = 0.2;
+const [mvup, mvleft, mvright, mvdown] = [
+  { vy: v },
+  { vx: -v },
+  { vx: v },
+  { vy: -v },
+];
+
+export function afterKeysPressed({ board, keys, ...rest }: Msg): Msg {
+  const mapping: { [s: number]: Partial<Entity> } = {
+    [keycodes.w]: mvup,
+    [keycodes.a]: mvleft,
+    [keycodes.s]: mvdown,
+    [keycodes.d]: mvright,
   };
 
   // @ts-ignore
-  const keys: (keyof typeof mapping)[] = Array.from(keysPressed).filter(
-    (k) => k in mapping
-  );
-  // @ts-ignore
-  const players: Entity[] = board.entities
-    .filter((e) => e.id)
-    .map((p) =>
-      keys
-        .map((k) => mapping[k])
-        .reduce(
-          (prev: Entity, cur) => {
-            return {
+  const movedPlayers: Entity[] = Object.entries(keys)
+    .map(([id, keysPressed]) => {
+      const player = board.entities.filter((e) => e.id == id).pop();
+      return (
+        player &&
+        Array.from(keysPressed)
+          .map((k) => mapping[k])
+          .reduce(
+            (prev, cur) => ({
               ...prev,
               ...cur,
-            } as Entity;
-          },
-          { ...p, vx: 0, vy: 0 }
-        )
-    );
+            }),
+            { ...player, vx: 0, vy: 0 }
+          )
+      );
+    })
+    .filter((p) => p);
 
   return {
     board: {
       ...board,
-      entities: [...players, ...board.entities.filter((e) => !e.id)],
+      entities: [
+        ...movedPlayers,
+        ...board.entities.filter((e) => !(e.id in keys)),
+      ].filter((e) => e),
     },
-    keysPressed,
+    keys,
     ...rest,
   };
 }
 
-export function afterMouseDown({ board, click, ...msg }: Msg): Msg {
-  if (!click) {
-    return { ...msg, board };
-  }
-  const { x: mx, y: my } = click;
-  const players = board.entities.filter((e) => e.id);
+export function afterClicks({ board, clicks, ...msg }: Msg): Msg {
+  const newBullets = clicks
+    .map((click) => {
+      const { x: mx, y: my, entityId } = click;
 
-  const bullets = players.map((p) => {
-    const relx = mx - p.x;
-    const rely = my - p.y;
-    const magnitude = Math.sqrt(relx * relx + rely * rely);
+      // player
+      const p = board.entities.filter((e) => e.id == entityId).pop();
+      if (!p) {
+        return;
+      }
+      const relx = mx - p.x;
+      const rely = my - p.y;
+      const magnitude = Math.sqrt(relx * relx + rely * rely);
 
-    const v = 0.4;
-    const vx = relx / magnitude;
-    const vy = rely / magnitude;
+      const v = 0.4;
+      const vx = relx / magnitude;
+      const vy = rely / magnitude;
 
-    const r = p.r + 2 + 2;
+      const r = p.r + 2 + 2;
 
-    return Bullet(p.x + r * vx, p.y + r * vy, v * vx, v * vy);
-  });
+      return Bullet(p.x + r * vx, p.y + r * vy, v * vx, v * vy);
+    })
+    .filter((b) => b);
 
   return {
     ...msg,
-    click,
-    board: { ...board, entities: [...board.entities, ...bullets] },
+    clicks,
+    board: { ...board, entities: [...board.entities, ...newBullets] },
   };
 }
 
