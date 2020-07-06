@@ -129,6 +129,9 @@ document
     };
 
     pc.onicecandidate = (e) => {
+      if (!e.candidate) {
+        return;
+      }
       console.log("Emitting icecandidate for guest");
       sock.emit("icecandidate", JSON.stringify(e.candidate));
     };
@@ -189,6 +192,9 @@ document
     };
 
     pc.onicecandidate = async (e) => {
+      if (!e.candidate) {
+        return;
+      }
       console.log("Remote emitting ice candidate");
       sock.emit("icecandidate", JSON.stringify(e.candidate));
     };
