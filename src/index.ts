@@ -121,6 +121,15 @@ document
     console.log("Setting up peer connection, creating offer");
     const pc = new RTCPeerConnection(_RTC_CONFIG);
 
+    pc.ontrack = (e) => {
+      console.log("Host got track", e);
+      const elt = document.createElement("audio");
+      elt.srcObject = e.streams[0];
+      elt.autoplay = true;
+      elt.controls = true;
+      document.body.appendChild(elt);
+    };
+
     pc.ondatachannel = (e) =>
       console.log("Received datachannel from remote", e);
     pc.onicegatheringstatechange = () =>
@@ -130,13 +139,8 @@ document
       console.log("Host ice conn state change", pc.iceConnectionState);
     };
 
-    pc.onicecandidate = (e) => {
-      if (!e.candidate) {
-        return;
-      }
-      console.log("Emitting icecandidate for guest", e.candidate);
-      sock.emit("icecandidate", JSON.stringify(e.candidate));
-    };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
     const channel = pc.createDataChannel("entities");
     const remoteKeysStream = getRemoteKeysPressedStream(channel);
@@ -163,16 +167,23 @@ document
       sock.emit("offer", JSON.stringify(offer));
     }, 500);
 
-    sock.on("answer", async (s: string) => {
+    sock.once("answer", async (s: string) => {
       console.log("Host got an answer");
       await pc.setRemoteDescription(JSON.parse(s));
+
+      sock.on("icecandidate", (c: string) => {
+        console.log("Host got icecandidate", c);
+        pc.addIceCandidate(JSON.parse(c));
+      });
+
+      pc.onicecandidate = (e) => {
+        console.log("Host Emitting icecandidate for guest", e.candidate);
+        sock.emit("icecandidate", JSON.stringify(e.candidate));
+      };
+
       clearInterval(offerPoll);
     });
-
-    sock.on("icecandidate", (c: string) => {
-      console.log("Host got icecandidate", c);
-      pc.addIceCandidate(JSON.parse(c));
-    });
+    w.local = pc;
 
     pc.onnegotiationneeded = console.log;
     pc.onsignalingstatechange = () =>
@@ -180,6 +191,7 @@ document
     pc.onicecandidateerror = (e) =>
       console.log("Host ice candidate error", e.errorText);
   });
+let w: any = window;
 
 document
   .querySelector<HTMLButtonElement>("button#join")
@@ -189,22 +201,28 @@ document
     console.log("Creating guest");
     const pc = new RTCPeerConnection(_RTC_CONFIG);
 
+    pc.ontrack = (e) => {
+      console.log("Remote got track", e);
+      const elt = document.createElement("audio");
+      elt.srcObject = e.streams[0];
+      elt.autoplay = true;
+      elt.controls = true;
+      document.body.appendChild(elt);
+    };
+    w.remote = pc;
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
     pc.oniceconnectionstatechange = () =>
       console.log("Remote: ICE connection state:", pc.iceConnectionState);
     pc.onicecandidateerror = (e) =>
       console.log("Remote ice candidate error", e.errorText);
 
     pc.onicecandidate = (e) => {
-      if (!e.candidate) {
-        return;
-      }
       console.log("Remote emitting ice candidate", e.candidate);
       sock.emit("icecandidate", JSON.stringify(e.candidate));
     };
-    sock.on("icecandidate", (c: string) => {
-      console.log("Remote got ice candidate", c);
-      pc.addIceCandidate(JSON.parse(c));
-    });
 
     pc.onicegatheringstatechange = () =>
       console.log("Remote ice gathering state", pc.iceGatheringState);
@@ -244,6 +262,11 @@ document
       console.log("Creating answer");
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+
+      sock.on("icecandidate", (c: string) => {
+        console.log("Remote got ice candidate", c);
+        pc.addIceCandidate(JSON.parse(c));
+      });
 
       console.log("Replying with answer");
       sock.emit("answer", JSON.stringify(answer));
