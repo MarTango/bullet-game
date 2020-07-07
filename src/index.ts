@@ -123,23 +123,20 @@ document
 
     pc.ondatachannel = (e) =>
       console.log("Received datachannel from remote", e);
+    pc.onicegatheringstatechange = () =>
+      console.log("Host ice gathering state", pc.iceGatheringState);
 
-    pc.oniceconnectionstatechange = (e) => {
-      console.log("ice conn state change", e, pc.iceConnectionState);
+    pc.oniceconnectionstatechange = () => {
+      console.log("Host ice conn state change", pc.iceConnectionState);
     };
 
     pc.onicecandidate = (e) => {
       if (!e.candidate) {
         return;
       }
-      console.log("Emitting icecandidate for guest");
+      console.log("Emitting icecandidate for guest", e.candidate);
       sock.emit("icecandidate", JSON.stringify(e.candidate));
     };
-
-    sock.on("icecandidate", (c: string) => {
-      console.log("Host got icecandidate");
-      pc.addIceCandidate(JSON.parse(c));
-    });
 
     const channel = pc.createDataChannel("entities");
     const remoteKeysStream = getRemoteKeysPressedStream(channel);
@@ -166,14 +163,22 @@ document
       sock.emit("offer", JSON.stringify(offer));
     }, 500);
 
-    sock.on("answer", (s: string) => {
+    sock.on("answer", async (s: string) => {
       console.log("Host got an answer");
-      pc.setRemoteDescription(JSON.parse(s));
+      await pc.setRemoteDescription(JSON.parse(s));
       clearInterval(offerPoll);
     });
 
+    sock.on("icecandidate", (c: string) => {
+      console.log("Host got icecandidate", c);
+      pc.addIceCandidate(JSON.parse(c));
+    });
+
     pc.onnegotiationneeded = console.log;
-    pc.onsignalingstatechange = console.log;
+    pc.onsignalingstatechange = () =>
+      console.log("Host signaling state changed", pc.signalingState);
+    pc.onicecandidateerror = (e) =>
+      console.log("Host ice candidate error", e.errorText);
   });
 
 document
@@ -183,25 +188,26 @@ document
     const id = "guest";
     console.log("Creating guest");
     const pc = new RTCPeerConnection(_RTC_CONFIG);
-    pc.ontrack = (e) => {
-      const audio = document.createElement("audio");
-      audio.autoplay = true;
-      audio.controls = false;
-      audio.srcObject = e.streams[0];
-      document.body.appendChild(audio);
-    };
 
-    pc.onicecandidate = async (e) => {
+    pc.oniceconnectionstatechange = () =>
+      console.log("Remote: ICE connection state:", pc.iceConnectionState);
+    pc.onicecandidateerror = (e) =>
+      console.log("Remote ice candidate error", e.errorText);
+
+    pc.onicecandidate = (e) => {
       if (!e.candidate) {
         return;
       }
-      console.log("Remote emitting ice candidate");
+      console.log("Remote emitting ice candidate", e.candidate);
       sock.emit("icecandidate", JSON.stringify(e.candidate));
     };
     sock.on("icecandidate", (c: string) => {
-      console.log("Remote got ice candidate");
+      console.log("Remote got ice candidate", c);
       pc.addIceCandidate(JSON.parse(c));
     });
+
+    pc.onicegatheringstatechange = () =>
+      console.log("Remote ice gathering state", pc.iceGatheringState);
 
     pc.ondatachannel = (e) => {
       console.log("Got datachannel from host", e);
@@ -232,7 +238,7 @@ document
     };
 
     console.log("Remote listening for offer");
-    sock.on("offer", async (offer: string) => {
+    sock.once("offer", async (offer: string) => {
       console.log("Remote got offer");
       await pc.setRemoteDescription(JSON.parse(offer));
       console.log("Creating answer");
