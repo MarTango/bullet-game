@@ -56,24 +56,24 @@ document
       sock.emit("icecandidate", e.candidate);
     };
 
-    console.log("HOST Setting up datachannel");
-    const channel = pc.createDataChannel("entities");
-    const remoteKeysStream = getRemoteKeysPressedStream(channel);
-    const remoteClickStream = getRemoteClickStream(channel);
+    // console.log("HOST Setting up datachannel");
+    // const channel = pc.createDataChannel("entities");
+    // const remoteKeysStream = getRemoteKeysPressedStream(channel);
+    // const remoteClickStream = getRemoteClickStream(channel);
 
-    channel.onopen = () => {
-      console.log("HOST: Channel open, starting game and sending entities");
-      start({
-        board: init(),
-        onBoardUpdate: (board) => {
-          display(board);
-          channel.send(JSON.stringify(board.entities));
-        },
-        remoteKeysStream,
-        remoteClickStream,
-        pc,
-      });
-    };
+    // channel.onopen = () => {
+    //   console.log("HOST: Channel open, starting game and sending entities");
+    //   start({
+    //     board: init(),
+    //     onBoardUpdate: (board) => {
+    //       display(board);
+    //       channel.send(JSON.stringify(board.entities));
+    //     },
+    //     remoteKeysStream,
+    //     remoteClickStream,
+    //     pc,
+    //   });
+    // };
 
     console.log("creating offer");
     const offer = await pc.createOffer();
@@ -95,17 +95,6 @@ document
       await pc.setRemoteDescription(s);
       this.disabled = true;
     });
-
-    // pc.onicegatheringstatechange = () =>
-    //   console.log("HOST ice gathering state", pc.iceGatheringState);
-    // pc.oniceconnectionstatechange = () =>
-    //   console.log("HOST ice conn state", pc.iceConnectionState);
-    // pc.onconnectionstatechange = () =>
-    //   console.log("HOST conn state", pc.connectionState);
-    // pc.onsignalingstatechange = () =>
-    //   console.log("HOST signaling state", pc.signalingState);
-    // pc.onicecandidateerror = (e) =>
-    //   console.log("HOST ice candidate error", e.errorText);
   });
 
 document
@@ -118,38 +107,38 @@ document
       w.remote = pc;
       onTrack(pc, "REMOTE");
       await addTracks(pc);
-      pc.ondatachannel = (e) => {
-        console.log("Got datachannel from host", e);
-        const canvas: HTMLCanvasElement = document.querySelector("canvas");
-        const ctx = canvas.getContext("2d");
+      // pc.ondatachannel = (e) => {
+      //   console.log("Got datachannel from host", e);
+      //   const canvas: HTMLCanvasElement = document.querySelector("canvas");
+      //   const ctx = canvas.getContext("2d");
 
-        e.channel.addEventListener("message", (b: MessageEvent) => {
-          const entities = JSON.parse(b.data);
-          const board = {
-            ctx,
-            entities,
-          };
-          display(board);
-        });
+      //   e.channel.addEventListener("message", (b: MessageEvent) => {
+      //     const entities = JSON.parse(b.data);
+      //     const board = {
+      //       ctx,
+      //       entities,
+      //     };
+      //     display(board);
+      //   });
 
-        const clickStream = getClickStream("guest", canvas);
-        const keysPressedStream = getLocalKeysPressedStream();
+      //   const clickStream = getClickStream("guest", canvas);
+      //   const keysPressedStream = getLocalKeysPressedStream();
 
-        requestAnimationFrame(function send() {
-          e.channel.send(
-            JSON.stringify({
-              keysPressed: [...keysPressedStream.next().value],
-              click: clickStream.next().value,
-            })
-          );
-          requestAnimationFrame(send);
-        });
-      };
+      //   requestAnimationFrame(function send() {
+      //     e.channel.send(
+      //       JSON.stringify({
+      //         keysPressed: [...keysPressedStream.next().value],
+      //         click: clickStream.next().value,
+      //       })
+      //     );
+      //     requestAnimationFrame(send);
+      //   });
+      // };
 
       pc.onicecandidate = (e) => {
-        // if (!e.candidate) {
-        //   return;
-        // }
+        if (!e.candidate) {
+          return;
+        }
         console.log("REMOTE emitting ice candidate", e.candidate);
         sock.emit("icecandidate", e.candidate);
       };
