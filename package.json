@@ -4,7 +4,9 @@
   "description": "",
   "scripts": {
     "build": "webpack -p",
-    "dev": "webpack-dev-server"
+    "dev": "webpack-dev-server",
+    "heroku-post-build": "webpack",
+    "start": "node server.js"
   },
   "author": "",
   "license": "ISC",
