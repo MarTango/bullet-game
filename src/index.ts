@@ -38,62 +38,70 @@ function onTrack(pc: RTCPeerConnection, name: string) {
   });
 }
 
+const ROOM = "alpha";
+
 document
   .querySelector<HTMLButtonElement>("button#host")
   .addEventListener("click", async function () {
     const sock = io(SIGNALING_SERVER);
+    const emit = (msg: object) => sock.emit(ROOM, msg);
 
     const pc = new RTCPeerConnection(_RTC_CONFIG);
     w.local = pc;
     onTrack(pc, "HOST");
     await addTracks(pc);
 
-    pc.onicecandidate = (e) => {
+    console.log("HOST Setting up datachannel");
+    const channel = pc.createDataChannel("entities");
+    const remoteKeysStream = getRemoteKeysPressedStream(channel);
+    const remoteClickStream = getRemoteClickStream(channel);
+
+    channel.onopen = () => {
+      console.log("HOST: Channel open, starting game and sending entities");
+      start({
+        board: init(),
+        onBoardUpdate: (board) => {
+          display(board);
+          channel.send(JSON.stringify(board.entities));
+        },
+        remoteKeysStream,
+        remoteClickStream,
+        pc,
+      });
+    };
+
+    pc.addEventListener("icecandidate", (e) => {
       if (!e.candidate) {
         return;
       }
-      console.log("HOST Emitting icecandidate for guest", e.candidate);
-      sock.emit("icecandidate", e.candidate);
-    };
+      console.log("HOST Emitting icecandidate", e.candidate);
+      emit({ candidate: e.candidate });
+    });
 
-    // console.log("HOST Setting up datachannel");
-    // const channel = pc.createDataChannel("entities");
-    // const remoteKeysStream = getRemoteKeysPressedStream(channel);
-    // const remoteClickStream = getRemoteClickStream(channel);
-
-    // channel.onopen = () => {
-    //   console.log("HOST: Channel open, starting game and sending entities");
-    //   start({
-    //     board: init(),
-    //     onBoardUpdate: (board) => {
-    //       display(board);
-    //       channel.send(JSON.stringify(board.entities));
-    //     },
-    //     remoteKeysStream,
-    //     remoteClickStream,
-    //     pc,
-    //   });
-    // };
-
-    console.log("creating offer");
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const offerPoll = setInterval(() => {
-      console.log("HOST: emitting offer");
-      sock.emit("offer", offer);
-    }, 500);
+    let offerPoll = setInterval(() => {
+      if (pc.remoteDescription) {
+        clearInterval(offerPoll);
+      }
+      console.log("HOST emitting offer");
+      emit({ offer });
+    }, 1000);
+    const myOffer = offer;
 
-    sock.on("icecandidate", (c: object) => {
-      console.log("HOST got icecandidate", c);
-      pc.addIceCandidate(c);
-    });
-
-    sock.once("answer", async (s: object) => {
-      clearInterval(offerPoll);
-      console.log("HOST got an answer");
-      await pc.setRemoteDescription(s);
-      this.disabled = true;
+    // @ts-ignore
+    sock.on(ROOM, async ({ offer, candidate, answer }) => {
+      console.log("HOST", { offer, candidate, answer });
+      if (answer && offer.sdp == myOffer.sdp) {
+        console.log("HOST setting remote description");
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        return;
+      }
+      if (candidate) {
+        console.log("HOST got candidate");
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
     });
   });
 
@@ -101,61 +109,62 @@ document
   .querySelector<HTMLButtonElement>("button#join")
   .addEventListener("click", async function () {
     const sock = io(SIGNALING_SERVER);
-    console.log("REMOTE listening for offer");
-    sock.once("offer", async (offer: object) => {
-      const pc = new RTCPeerConnection(_RTC_CONFIG);
-      w.remote = pc;
-      onTrack(pc, "REMOTE");
-      await addTracks(pc);
-      // pc.ondatachannel = (e) => {
-      //   console.log("Got datachannel from host", e);
-      //   const canvas: HTMLCanvasElement = document.querySelector("canvas");
-      //   const ctx = canvas.getContext("2d");
+    const emit = (msg: any) => sock.emit(ROOM, msg);
 
-      //   e.channel.addEventListener("message", (b: MessageEvent) => {
-      //     const entities = JSON.parse(b.data);
-      //     const board = {
-      //       ctx,
-      //       entities,
-      //     };
-      //     display(board);
-      //   });
+    const pc = new RTCPeerConnection(_RTC_CONFIG);
+    w.remote = pc;
 
-      //   const clickStream = getClickStream("guest", canvas);
-      //   const keysPressedStream = getLocalKeysPressedStream();
-
-      //   requestAnimationFrame(function send() {
-      //     e.channel.send(
-      //       JSON.stringify({
-      //         keysPressed: [...keysPressedStream.next().value],
-      //         click: clickStream.next().value,
-      //       })
-      //     );
-      //     requestAnimationFrame(send);
-      //   });
-      // };
-
-      pc.onicecandidate = (e) => {
-        if (!e.candidate) {
-          return;
-        }
-        console.log("REMOTE emitting ice candidate", e.candidate);
-        sock.emit("icecandidate", e.candidate);
-      };
-
-      sock.on("icecandidate", async (c: object) => {
-        console.log("REMOTE got ice candidate", c);
-        await pc.addIceCandidate(c);
-      });
-
-      console.log("REMOTE got offer");
-      await pc.setRemoteDescription(offer);
-      console.log("Creating answer");
-      const answer = await pc.createAnswer();
-      console.log("REMOTE setting local description", answer);
-      await pc.setLocalDescription(answer);
-      console.log("Replying with answer");
-      sock.emit("answer", answer);
+    pc.addEventListener("icecandidate", ({ candidate }) => {
+      if (!candidate) {
+        return;
+      }
+      console.log("REMOTE emitting ice candidate", candidate);
+      emit({ candidate });
     });
-    this.disabled = true;
+
+    onTrack(pc, "REMOTE");
+    await addTracks(pc);
+    pc.ondatachannel = (e) => {
+      console.log("Got datachannel from host", e);
+      const canvas: HTMLCanvasElement = document.querySelector("canvas");
+      const ctx = canvas.getContext("2d");
+      e.channel.addEventListener("message", (b: MessageEvent) => {
+        const entities = JSON.parse(b.data);
+        const board = {
+          ctx,
+          entities,
+        };
+        display(board);
+      });
+      const clickStream = getClickStream("guest", canvas);
+      const keysPressedStream = getLocalKeysPressedStream();
+      requestAnimationFrame(function send() {
+        e.channel.send(
+          JSON.stringify({
+            keysPressed: [...keysPressedStream.next().value],
+            click: clickStream.next().value,
+          })
+        );
+        requestAnimationFrame(send);
+      });
+    };
+
+    // @ts-ignore
+    sock.on(ROOM, async ({ offer, candidate }) => {
+      console.log("REMOTE", { offer, candidate });
+      if (offer && !pc.remoteDescription) {
+        console.log("REMOTE got offer");
+        console.log("REMOTE setting remote description");
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        console.log("REMOTE Creating answer");
+        const answer = await pc.createAnswer();
+        console.log("REMOTE setting local description", answer);
+        await pc.setLocalDescription(answer);
+        console.log("REMOTE emitting answer");
+        emit({ answer, offer });
+      } else if (candidate) {
+        console.log("REMOTE got ice candidate");
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
   });
