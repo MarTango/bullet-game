@@ -12,14 +12,23 @@ let w: any = window;
 const _RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
-const SIGNALING_SERVER = "https://marchat.herokuapp.com";
 
 async function addTracks(pc: RTCPeerConnection) {
   try {
     await navigator.mediaDevices
-      .getUserMedia({ audio: true })
+      .getUserMedia({
+        video: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      })
       .then((stream) => {
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+        const elt = document.querySelector<HTMLVideoElement>("video#host");
+        elt.srcObject = stream;
+        elt.autoplay = true;
+        elt.muted = true;
         console.log("Added Track");
       });
   } catch (err) {
@@ -27,15 +36,21 @@ async function addTracks(pc: RTCPeerConnection) {
   }
 }
 
-function onTrack(pc: RTCPeerConnection, name: string) {
-  pc.addEventListener("track", (e) => {
+function getTrackHandler(name: string) {
+  const streams: MediaStream[] = [];
+  return (e: RTCTrackEvent) => {
     console.log(`${name} got track`, e);
-    const elt = document.createElement("audio");
-    elt.srcObject = e.streams[0];
+    const stream = e.streams[0];
+
+    if (streams.indexOf(stream) != -1) {
+      return;
+    }
+    streams.push(stream);
+
+    const elt = document.querySelector<HTMLVideoElement>("video#guest");
+    elt.srcObject = stream;
     elt.autoplay = true;
-    elt.controls = true;
-    document.body.appendChild(elt);
-  });
+  };
 }
 
 const ROOM = "alpha";
@@ -43,12 +58,12 @@ const ROOM = "alpha";
 document
   .querySelector<HTMLButtonElement>("button#host")
   .addEventListener("click", async function () {
-    const sock = io(SIGNALING_SERVER);
+    const sock = io();
     const emit = (msg: object) => sock.emit(ROOM, msg);
 
     const pc = new RTCPeerConnection(_RTC_CONFIG);
     w.local = pc;
-    onTrack(pc, "HOST");
+    pc.ontrack = getTrackHandler("HOST");
     await addTracks(pc);
 
     console.log("HOST Setting up datachannel");
@@ -75,11 +90,12 @@ document
         return;
       }
       console.log("HOST Emitting icecandidate", e.candidate);
-      emit({ candidate: e.candidate });
+      emit({ to: guest, candidate: e.candidate });
     });
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    let guest: string | undefined;
 
     let offerPoll = setInterval(() => {
       if (pc.remoteDescription) {
@@ -88,14 +104,16 @@ document
       console.log("HOST emitting offer");
       emit({ offer });
     }, 1000);
-    const myOffer = offer;
 
     // @ts-ignore
-    sock.on(ROOM, async ({ offer, candidate, answer }) => {
-      console.log("HOST", { offer, candidate, answer });
-      if (answer && offer.sdp == myOffer.sdp) {
+    sock.on(ROOM, async ({ to, from, candidate, answer }) => {
+      if (to != sock.id) {
+        return;
+      }
+      if (answer) {
         console.log("HOST setting remote description");
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        guest = from;
         return;
       }
       if (candidate) {
@@ -108,7 +126,7 @@ document
 document
   .querySelector<HTMLButtonElement>("button#join")
   .addEventListener("click", async function () {
-    const sock = io(SIGNALING_SERVER);
+    const sock = io();
     const emit = (msg: any) => sock.emit(ROOM, msg);
 
     const pc = new RTCPeerConnection(_RTC_CONFIG);
@@ -119,11 +137,12 @@ document
         return;
       }
       console.log("REMOTE emitting ice candidate", candidate);
-      emit({ candidate });
+      emit({ to: host, candidate });
     });
 
-    onTrack(pc, "REMOTE");
+    pc.ontrack = getTrackHandler("REMOTE");
     await addTracks(pc);
+
     pc.ondatachannel = (e) => {
       console.log("Got datachannel from host", e);
       const canvas: HTMLCanvasElement = document.querySelector("canvas");
@@ -149,10 +168,13 @@ document
       });
     };
 
+    let host: number;
+
     // @ts-ignore
-    sock.on(ROOM, async ({ offer, candidate }) => {
-      console.log("REMOTE", { offer, candidate });
+    sock.on(ROOM, async ({ offer, candidate, to, from }) => {
+      console.log("REMOTE", { offer, candidate, to, from });
       if (offer && !pc.remoteDescription) {
+        host = from;
         console.log("REMOTE got offer");
         console.log("REMOTE setting remote description");
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -161,8 +183,8 @@ document
         console.log("REMOTE setting local description", answer);
         await pc.setLocalDescription(answer);
         console.log("REMOTE emitting answer");
-        emit({ answer, offer });
-      } else if (candidate) {
+        emit({ to: from, answer, offer });
+      } else if (candidate && to == sock.id) {
         console.log("REMOTE got ice candidate");
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       }
