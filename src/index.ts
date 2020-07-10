@@ -44,6 +44,8 @@ const emit = (msg: object) => sock.emit(ROOM, msg);
 
 let pc: RTCPeerConnection;
 
+let reset = false;
+
 setTimeout(() => {
   emit({ connected: "Yep, I connected" });
   // @ts-ignore
@@ -51,8 +53,7 @@ setTimeout(() => {
     console.log({ from, connected, candidate, to, offer, answer });
     if (connected && !pc) {
       pc = new RTCPeerConnection(RTC_CONFIG);
-      // @ts-ignore
-      window.pc = pc;
+      w.pc = pc;
       await addTracks(pc);
       onTrack(pc, "HOST");
       const channel = pc.createDataChannel("entities");
@@ -69,9 +70,13 @@ setTimeout(() => {
           },
           remoteKeysStream,
           remoteClickStream,
-          pc,
+          shouldReset: () => reset,
+          reset: () => (reset = false),
         });
       };
+
+      document.querySelector<HTMLButtonElement>("button#reset").onclick = () =>
+        (reset = true);
 
       pc.onicecandidate = ({ candidate }) => {
         if (!candidate) {
@@ -88,9 +93,7 @@ setTimeout(() => {
       await pc.addIceCandidate(candidate);
     } else if (offer && !pc) {
       pc = new RTCPeerConnection(RTC_CONFIG);
-
-      // @ts-ignore
-      window.pc = pc;
+      w.pc = pc;
       pc.ondatachannel = (e) => {
         console.log("Got datachannel from host", e);
         const canvas: HTMLCanvasElement = document.querySelector("canvas");

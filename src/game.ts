@@ -13,13 +13,15 @@ export function start({
   onBoardUpdate,
   remoteKeysStream,
   remoteClickStream,
-  pc,
+  shouldReset,
+  reset,
 }: {
   board: State;
   onBoardUpdate: (b: State) => void;
   remoteKeysStream: ReturnType<typeof getLocalKeysPressedStream>;
   remoteClickStream: Iterator<Msg["clicks"][0]>;
-  pc: RTCPeerConnection;
+  shouldReset: () => boolean;
+  reset: () => void;
 }) {
   const id = "host";
 
@@ -51,6 +53,10 @@ export function start({
     };
     board = update(msg).board;
     onBoardUpdate(board);
+    if (shouldReset()) {
+      board = init();
+      reset();
+    }
     requestAnimationFrame(frame);
   });
 }
