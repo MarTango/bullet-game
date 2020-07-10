@@ -10,7 +10,14 @@ import {
 let w: any = window;
 
 const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302"] },
+    {
+      urls: ["turn:relay.backups.cz"],
+      credential: "webrtc",
+      username: "webrtc",
+    },
+  ],
 };
 const SIGNALING_SERVER = "https://marchat.herokuapp.com";
 
