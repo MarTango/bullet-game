@@ -8,14 +8,34 @@ import {
   getRemoteStickStream,
   setStick,
 } from "./streams";
+import { initChat } from "./chat";
 import { decodeCode, encodeCode, waitForIce } from "./signaling";
 
 const w: any = window;
 
-// STUN only. Without a TURN relay, a minority of strict NATs can't connect.
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
-};
+// STUN finds each player's public address for a direct connection. The Metered
+// TURN relay is the fallback for networks where that fails (strict NATs, some
+// mobile carriers). The credential is injected at build time from .env or CI
+// secrets, so it isn't in the repo, but it is readable in the deployed bundle:
+// rotate it in the Metered dashboard if it's abused. Without it we use STUN only.
+const TURN_URLS = [
+  "turn:global.relay.metered.ca:80",
+  "turn:global.relay.metered.ca:80?transport=tcp",
+  "turn:global.relay.metered.ca:443",
+  "turns:global.relay.metered.ca:443?transport=tcp",
+];
+
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun.relay.metered.ca:80" },
+  ...(__TURN_USERNAME__ && __TURN_CREDENTIAL__
+    ? TURN_URLS.map((urls) => ({
+        urls,
+        username: __TURN_USERNAME__,
+        credential: __TURN_CREDENTIAL__,
+      }))
+    : []),
+];
 
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -29,79 +49,43 @@ const setStatus = (msg: string, isError = false) => {
 const show = (id: string, visible = true) =>
   ($(id).style.display = visible ? "" : "none");
 
-const MIC_TIMEOUT_MS = 15000;
+let wasConnected = false;
+let connectionEnded = false;
+let unstable = false;
 
-// Our own mic tracks, kept so the mute button can switch them off.
-const localTracks: MediaStreamTrack[] = [];
-
-function setMuted(muted: boolean) {
-  // Disabling a track sends silence without renegotiating the connection.
-  localTracks.forEach((t) => (t.enabled = !muted));
-  $("mute").textContent = muted ? "Unmute mic" : "Mute mic";
-  $("mic-note").textContent = muted
-    ? "Microphone muted."
-    : "Microphone on: voice chat enabled.";
-}
-
-// Adds the local mic to the connection. Resolves false (never throws) if the
-// mic is denied, missing, or the permission prompt is left unanswered, so the
-// game can always continue without voice chat.
-async function addTracks(pc: RTCPeerConnection): Promise<boolean> {
-  let timedOut = false;
-  let timer: number;
-  try {
-    $("mic-note").textContent =
-      "Waiting for microphone permission (you can play without it)…";
-    const request = navigator.mediaDevices.getUserMedia({ audio: true });
-    const timeout = new Promise<never>((_, reject) => {
-      timer = window.setTimeout(() => {
-        timedOut = true;
-        reject(new Error("Microphone permission prompt timed out"));
-      }, MIC_TIMEOUT_MS);
-    });
-    // If the prompt is answered after we gave up, release the mic again.
-    request.then(
-      (s) => timedOut && s.getTracks().forEach((t) => t.stop()),
-      () => {}
-    );
-    const stream = await Promise.race([request, timeout]);
-    stream.getTracks().forEach((t) => {
-      pc.addTrack(t, stream);
-      localTracks.push(t);
-    });
-    $("mic-note").textContent = "Microphone on: voice chat enabled.";
-    return true;
-  } catch (err) {
-    console.error(err);
-    $("mic-note").textContent = "Microphone unavailable: voice chat is off for you.";
-    return false;
-  } finally {
-    clearTimeout(timer);
+// The connection is gone for good: stop the game, put the controls away and
+// offer a way back to the start. Safe to call more than once.
+function endConnection() {
+  if (connectionEnded) {
+    return;
   }
-}
-
-function onTrack(pc: RTCPeerConnection, name: string) {
-  pc.addEventListener("track", (e) => {
-    console.log(`${name} got track`, e);
-    const elt = document.createElement("audio");
-    elt.srcObject = e.streams[0];
-    elt.autoplay = true;
-    elt.controls = true;
-    document.body.appendChild(elt);
-  });
+  connectionEnded = true;
+  setStick(0, 0);
+  document.body.classList.remove("playing");
+  ["reset", "stick", "chat-toggle", "chat"].forEach((id) => show(id, false));
+  show("restart");
+  setStatus(
+    wasConnected
+      ? "The other player disconnected."
+      : "Connection failed. Some networks block direct connections, so try again.",
+    true
+  );
 }
 
 function newConnection(name: string) {
-  const pc = new RTCPeerConnection(RTC_CONFIG);
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
   w.pc = pc;
   pc.addEventListener("connectionstatechange", () => {
-    if (pc.connectionState == "failed") {
-      setStatus(
-        "Connection failed. Reload the page and try again (some networks block direct connections).",
-        true
-      );
-    } else if (pc.connectionState == "disconnected") {
-      setStatus("Disconnected.", true);
+    const state = pc.connectionState;
+    if (state == "failed" || state == "closed") {
+      endConnection();
+    } else if (state == "disconnected" && wasConnected && !connectionEnded) {
+      // Often a brief network blip that recovers by itself.
+      unstable = true;
+      setStatus("Connection unstable…", true);
+    } else if (state == "connected" && unstable && !connectionEnded) {
+      unstable = false;
+      setStatus("Reconnected.");
     }
   });
   return pc;
@@ -112,7 +96,11 @@ function newConnection(name: string) {
 document.addEventListener(
   "touchmove",
   (e) => {
-    if (document.body.classList.contains("playing")) {
+    const target = e.target as HTMLElement;
+    if (
+      document.body.classList.contains("playing") &&
+      !target.closest("#chat-log")
+    ) {
       e.preventDefault();
     }
   },
@@ -120,10 +108,10 @@ document.addEventListener(
 );
 
 function onConnected(role: string) {
+  wasConnected = true;
   document.body.classList.add("playing");
   show("setup", false);
   show("reset", role == "host");
-  show("mute", localTracks.length > 0);
   if (isTouchDevice) {
     show("stick");
     setStatus(
@@ -235,17 +223,14 @@ async function createGame() {
   setStatus("Creating game code…");
 
   const pc = (hostPc = newConnection("host"));
-  // Without a mic we still need an audio section in the offer, otherwise a
-  // guest with a mic would have nowhere to send their audio.
-  if (!(await addTracks(pc))) {
-    pc.addTransceiver("audio", { direction: "recvonly" });
-  }
-  onTrack(pc, "HOST");
 
   const channel = pc.createDataChannel("entities");
+  initChat(pc.createDataChannel("chat"), "Red", "Yellow");
   const remoteKeysStream = getRemoteKeysPressedStream(channel);
   const remoteStickStream = getRemoteStickStream(channel);
   const remoteClickStream = getRemoteClickStream(channel);
+
+  channel.onclose = endConnection;
 
   channel.onopen = () => {
     console.log("HOST: Channel open, starting game and sending entities");
@@ -254,15 +239,18 @@ async function createGame() {
       board: init(),
       onBoardUpdate: (board) => {
         display(board);
-        channel.send(
-          JSON.stringify({ entities: board.entities, score: board.score })
-        );
+        if (channel.readyState == "open") {
+          channel.send(
+            JSON.stringify({ entities: board.entities, score: board.score })
+          );
+        }
       },
       remoteKeysStream,
       remoteStickStream,
       remoteClickStream,
       shouldReset: () => reset,
       reset: () => (reset = false),
+      shouldStop: () => connectionEnded,
     });
   };
 
@@ -298,10 +286,15 @@ async function createAnswer() {
   const pc = newConnection("guest");
   pc.ondatachannel = (e) => {
     console.log("Got datachannel from host", e);
+    if (e.channel.label == "chat") {
+      initChat(e.channel, "Yellow", "Red");
+      return;
+    }
     const channel = e.channel;
     const canvas: HTMLCanvasElement = document.querySelector("canvas");
     const ctx = canvas.getContext("2d");
 
+    channel.addEventListener("close", endConnection);
     channel.addEventListener("message", (b: MessageEvent) => {
       const { entities, score } = JSON.parse(b.data);
       display({ ctx, entities, score });
@@ -333,9 +326,6 @@ async function createAnswer() {
     }
   };
 
-  await addTracks(pc);
-  onTrack(pc, "GUEST");
-
   await pc.setRemoteDescription(offer);
   await pc.setLocalDescription(await pc.createAnswer());
   await waitForIce(pc);
@@ -350,7 +340,7 @@ async function createAnswer() {
 
 // ---------- UI wiring ----------
 
-$("mute").onclick = () => setMuted(localTracks.some((t) => t.enabled));
+$("restart").onclick = () => location.reload();
 $("create-game").onclick = guarded(createGame);
 $("accept-answer").onclick = guarded(acceptAnswer);
 $("join-game").onclick = () => {

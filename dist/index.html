@@ -9,9 +9,9 @@
     <div id="app">
       <div>
         <button id="reset" style="display: none">Reset</button>
-        <button id="mute" style="display: none">Mute mic</button>
+        <button id="chat-toggle" style="display: none">Chat</button>
+        <button id="restart" style="display: none">Start over</button>
         <p id="status">Host a new game, or join a friend's.</p>
-        <p id="mic-note"></p>
 
         <div id="setup">
           <div id="choose">
@@ -43,6 +43,19 @@
         <canvas height="640" width="640"></canvas>
 
         <div id="stick" style="display: none"><div id="knob"></div></div>
+
+        <div id="chat" style="display: none">
+          <div id="chat-log"></div>
+          <form id="chat-form">
+            <input
+              id="chat-input"
+              maxlength="300"
+              autocomplete="off"
+              placeholder="Message…"
+            />
+            <button type="submit">Send</button>
+          </form>
+        </div>
       </div>
     </div>
 
@@ -66,6 +79,38 @@
           max-width: min(100%, max(240px, calc(100vh - 340px)));
           max-width: min(100%, max(240px, calc(100dvh - 340px)));
         }
+      }
+      #chat {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        width: min(320px, calc(100vw - 24px));
+        padding: 8px;
+        background: #fff;
+        border: 1px solid #bbb;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+      }
+      #chat-log {
+        height: 140px;
+        overflow-y: auto;
+        margin-bottom: 6px;
+        font-size: 14px;
+        word-break: break-word;
+        /* The page is touch-locked while playing; let the log scroll. */
+        touch-action: pan-y;
+      }
+      #chat-form {
+        display: flex;
+        gap: 6px;
+      }
+      #chat-input {
+        flex: 1;
+        min-width: 0;
+        /* 16px stops iOS zooming in on focus. */
+        font-size: 16px;
+        user-select: text;
+        -webkit-user-select: text;
       }
       canvas {
         background: #eee;

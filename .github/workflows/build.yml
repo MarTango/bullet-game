@@ -24,6 +24,9 @@ jobs:
         node-version: 20
 
     - name: Install and Build
+      env:
+        TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
+        TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
       run: |
           npm ci
           npm run build

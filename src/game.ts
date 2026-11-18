@@ -22,6 +22,7 @@ export function start({
   remoteClickStream,
   shouldReset,
   reset,
+  shouldStop,
 }: {
   board: State;
   onBoardUpdate: (b: State) => void;
@@ -30,6 +31,7 @@ export function start({
   remoteClickStream: Iterator<Msg["clicks"][0]>;
   shouldReset: () => boolean;
   reset: () => void;
+  shouldStop: () => boolean;
 }) {
   const id = "host";
 
@@ -49,6 +51,9 @@ export function start({
   const stickStream = getLocalStickStream();
 
   requestAnimationFrame(async function frame() {
+    if (shouldStop()) {
+      return;
+    }
     const msg: Msg = {
       board,
       dt: dtStream.next().value,

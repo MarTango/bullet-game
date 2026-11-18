@@ -27,7 +27,9 @@ export function setKeyHeld(key: number, held: boolean) {
 export function getLocalKeysPressedStream() {
   return (function* () {
     window.addEventListener("keydown", (e) => {
-      if (VALID_KEYS.has(e.keyCode)) {
+      // Typing "wasd" into the chat box shouldn't move the player.
+      const typing = (e.target as HTMLElement).closest("input, textarea");
+      if (VALID_KEYS.has(e.keyCode) && !typing) {
         setKeyHeld(e.keyCode, true);
       }
     });
@@ -106,7 +108,7 @@ export function getClickStream(entityId: string, canvas: HTMLCanvasElement) {
     // Pointer events cover both mouse clicks and touch taps. Presses on
     // buttons, the move pad and form fields aren't shots.
     window.addEventListener("pointerdown", ({ clientX, clientY, target }) => {
-      if ((target as HTMLElement).closest("button, textarea")) {
+      if ((target as HTMLElement).closest("button, textarea, input, #chat")) {
         return;
       }
       // Measure the canvas at click time: the page layout shifts (setup panel
