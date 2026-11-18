@@ -2,11 +2,11 @@
   "compilerOptions": {
     "outDir": "./dist/",
     "noImplicitAny": true,
-    "module": "es6",
-    "target": "es3",
-    "jsx": "react",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "target": "es2017",
+    "lib": ["dom", "es2017"],
     "allowJs": true,
-    "sourceMap": true,
-    "downlevelIteration": true
+    "sourceMap": true
   }
 }
