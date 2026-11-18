@@ -4,3 +4,5 @@ export const keycodes = {
   s: 83,
   d: 68,
 };
+
+export const VALID_KEYS = new Set(Object.values(keycodes));

@@ -1,12 +1,15 @@
 // Text chat over its own data channel, kept separate from the game channel so
 // chat messages can never be mistaken for game input (or vice versa).
 
+import { opponentOf, PLAYER_NAMES } from "./config";
+import { Role } from "./types";
+import { $ } from "./ui";
+
 const MAX_LEN = 300;
 
-const $ = <T extends HTMLElement>(id: string) =>
-  document.getElementById(id) as T;
-
-export function initChat(channel: RTCDataChannel, me: string, them: string) {
+export function initChat(channel: RTCDataChannel, role: Role) {
+  const me = PLAYER_NAMES[role];
+  const them = PLAYER_NAMES[opponentOf(role)];
   const panel = $("chat");
   const log = $("chat-log");
   const form = $<HTMLFormElement>("chat-form");

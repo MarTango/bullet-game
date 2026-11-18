@@ -1,4 +1,23 @@
-// Compact binary encoding for the host -> guest game state.
+// Everything that crosses the network between host and guest.
+//
+// Three data channels, each suited to what it carries:
+//   state   unreliable   host -> guest game frames, guest -> host input
+//   events  reliable     guest -> host clicks (one-off events must not be lost)
+//   chat    reliable     text messages, both ways
+//
+// Anything read from the network is untrusted: the decoders return null for
+// malformed data and clamp or filter what they accept.
+
+import { VALID_KEYS } from "./controls";
+import { Click, Entity, Score, Stick } from "./types";
+
+export const CHANNELS = {
+  state: "state",
+  events: "events",
+  chat: "chat",
+} as const;
+
+// ---------- Game frames (host -> guest, binary) ----------
 //
 // The guest only needs to draw, so each entity is just position, radius and
 // colour (6 bytes), instead of the ~90 bytes of JSON it used to be.
@@ -6,8 +25,6 @@
 // Layout (little endian):
 //   header   seq u16 | hostScore u16 | guestScore u16 | count u16
 //   entity   x i16 | y i16 | r u8 | color u8        (x, y in 1/10 px)
-
-import { Entity, Score } from "./types";
 
 // Colours are sent as an index into this table. Anything unknown is drawn grey.
 const COLORS = ["red", "yellow", "black"];
@@ -86,4 +103,75 @@ export function decodeFrame(buf: ArrayBuffer): Frame | null {
 export function isNewer(seq: number, last: number): boolean {
   const diff = (seq - last + 0x10000) & 0xffff;
   return diff != 0 && diff < 0x8000;
+}
+
+// ---------- Input (guest -> host, JSON on the state channel) ----------
+//
+// Sent every frame and numbered, so the host can ignore any that arrive out of
+// order on the unordered channel.
+
+export interface InputMessage {
+  n: number;
+  keys: number[];
+  stick: Stick;
+}
+
+export const encodeInput = (message: InputMessage) => JSON.stringify(message);
+
+// Caps the stick's strength at 1 so a modified client can't move faster.
+function sanitizeStick(stick: any): Stick {
+  if (
+    !stick ||
+    typeof stick.x != "number" ||
+    typeof stick.y != "number" ||
+    !isFinite(stick.x) ||
+    !isFinite(stick.y)
+  ) {
+    return { x: 0, y: 0 };
+  }
+  const length = Math.hypot(stick.x, stick.y);
+  return length > 1
+    ? { x: stick.x / length, y: stick.y / length }
+    : { x: stick.x, y: stick.y };
+}
+
+export function decodeInput(data: unknown): InputMessage | null {
+  const message = parse(data);
+  if (!message || typeof message.n != "number" || !Array.isArray(message.keys)) {
+    return null;
+  }
+  return {
+    n: message.n,
+    keys: message.keys.filter((key: unknown) => VALID_KEYS.has(key as number)),
+    stick: sanitizeStick(message.stick),
+  };
+}
+
+// ---------- Clicks (guest -> host, JSON on the events channel) ----------
+//
+// The shooter isn't sent: the host decides who a click belongs to, so a guest
+// can't fire bullets as the host.
+
+export const encodeClick = ({ x, y }: Click) => JSON.stringify({ x, y });
+
+export function decodeClick(data: unknown, entityId: string): Click | null {
+  const message = parse(data);
+  if (
+    !message ||
+    typeof message.x != "number" ||
+    typeof message.y != "number" ||
+    !isFinite(message.x) ||
+    !isFinite(message.y)
+  ) {
+    return null;
+  }
+  return { entityId, x: message.x, y: message.y };
+}
+
+function parse(data: unknown): any {
+  try {
+    return JSON.parse(data as string);
+  } catch (err) {
+    return null;
+  }
 }

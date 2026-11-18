@@ -1,160 +1,108 @@
-import { Click, Stick } from "./types";
-import { keycodes } from "./controls";
-const VALID_KEYS = new Set(Object.values(keycodes));
+import { VALID_KEYS } from "./controls";
+import { decodeClick, decodeInput } from "./protocol";
+import { Click, Input, Stick } from "./types";
 
-export const dtStream = (function* () {
-  let prev = Date.now();
+// A stream is an endless iterator: ask for `.next().value` once per frame to
+// get the current value of something (time since the last frame, the keys
+// held right now, the next queued click...).
+function* stream<T>(read: () => T): Generator<T, never, undefined> {
   while (true) {
-    let next = Date.now();
-    const dt = next - prev;
-    prev = next;
-    yield dt;
+    yield read();
   }
-})();
+}
 
-// Keys currently held, shared by the keyboard handlers and the on-screen
-// touch buttons so both drive movement the same way.
+export function getDtStream() {
+  let previous = Date.now();
+  return stream(() => {
+    const now = Date.now();
+    const dt = now - previous;
+    previous = now;
+    return dt;
+  });
+}
+
+// Everything queued so far, oldest first.
+export function drain<T>(source: Iterator<T | undefined>): T[] {
+  const items: T[] = [];
+  for (let item = source.next().value; item; item = source.next().value) {
+    items.push(item);
+  }
+  return items;
+}
+
+// ---------- This player's controls ----------
+
 const heldKeys = new Set<number>();
-
-export function setKeyHeld(key: number, held: boolean) {
-  if (held) {
-    heldKeys.add(key);
-  } else {
-    heldKeys.delete(key);
-  }
-}
-
-export function getLocalKeysPressedStream() {
-  return (function* () {
-    window.addEventListener("keydown", (e) => {
-      // Typing "wasd" into the chat box shouldn't move the player.
-      const typing = (e.target as HTMLElement).closest("input, textarea");
-      if (VALID_KEYS.has(e.keyCode) && !typing) {
-        setKeyHeld(e.keyCode, true);
-      }
-    });
-
-    window.addEventListener("keyup", (e) => setKeyHeld(e.keyCode, false));
-
-    while (true) {
-      yield heldKeys;
-    }
-  })();
-}
-
-// Analog stick tilt, written by the on-screen stick.
 const heldStick: Stick = { x: 0, y: 0 };
 
+// Called by the on-screen stick.
 export function setStick(x: number, y: number) {
   heldStick.x = x;
   heldStick.y = y;
 }
 
-export function getLocalStickStream() {
-  return (function* () {
-    while (true) {
-      yield heldStick;
+export function getLocalInputStream() {
+  window.addEventListener("keydown", (e) => {
+    // Typing "wasd" into the chat box shouldn't move the player.
+    const typing = (e.target as HTMLElement).closest("input, textarea");
+    if (VALID_KEYS.has(e.keyCode) && !typing) {
+      heldKeys.add(e.keyCode);
     }
-  })();
+  });
+  window.addEventListener("keyup", (e) => heldKeys.delete(e.keyCode));
+
+  return stream((): Input => ({ keys: heldKeys, stick: heldStick }));
 }
 
-// The guest's value arrives over the network, so don't trust it: ignore
-// anything malformed and cap the strength at 1 (no speed hacks).
-function sanitizeStick(s?: Stick): Stick {
-  if (
-    !s ||
-    typeof s.x !== "number" ||
-    typeof s.y !== "number" ||
-    !isFinite(s.x) ||
-    !isFinite(s.y)
-  ) {
-    return { x: 0, y: 0 };
-  }
-  const len = Math.hypot(s.x, s.y);
-  return len > 1 ? { x: s.x / len, y: s.y / len } : { x: s.x, y: s.y };
-}
-
-export function getRemoteStickStream(channel: RTCDataChannel) {
-  return (function* () {
-    let latest: Stick = { x: 0, y: 0 };
-    let lastN = -1;
-    channel.addEventListener("message", (e) => {
-      const msg = JSON.parse(e.data);
-      // The channel is unordered, so ignore input older than what we have.
-      if (typeof msg.n == "number") {
-        if (msg.n <= lastN) {
-          return;
-        }
-        lastN = msg.n;
-      }
-      latest = sanitizeStick(msg.stick);
-    });
-    while (true) {
-      yield latest;
-    }
-  })();
-}
-
-export function getRemoteKeysPressedStream(channel: RTCDataChannel) {
-  return (function* () {
-    // Keys are state, not events: hold the latest set the guest reported.
-    let latest = new Set<number>();
-    let lastN = -1;
-
-    channel.addEventListener("message", (e) => {
-      const msg = JSON.parse(e.data);
-      if (typeof msg.n == "number") {
-        if (msg.n <= lastN) {
-          return;
-        }
-        lastN = msg.n;
-      }
-      latest = new Set<number>(msg.keysPressed);
-    });
-
-    while (true) {
-      yield latest;
-    }
-  })();
-}
+// Presses on these are using the interface, not shooting.
+const NOT_A_SHOT = "button, input, textarea, #chat, #stick";
 
 export function getClickStream(entityId: string, canvas: HTMLCanvasElement) {
-  return (function* () {
-    const queue: Click[] = [];
-    // Pointer events cover both mouse clicks and touch taps. Presses on
-    // buttons, the move pad and form fields aren't shots.
-    window.addEventListener("pointerdown", ({ clientX, clientY, target }) => {
-      if ((target as HTMLElement).closest("button, textarea, input, #chat")) {
-        return;
-      }
-      // Measure the canvas at click time: the page layout shifts (setup panel
-      // hiding, status text changing, scrolling), so a position captured when
-      // the stream was created goes stale.
-      const rect = canvas.getBoundingClientRect();
-      const x = ((clientX - rect.left) * canvas.width) / rect.width;
-      const y = ((clientY - rect.top) * canvas.height) / rect.height;
-      queue.push({ entityId, x, y: canvas.height - y });
-    });
-    while (true) {
-      yield queue.shift();
+  const queue: Click[] = [];
+  // Pointer events cover both mouse clicks and touch taps.
+  window.addEventListener("pointerdown", ({ clientX, clientY, target }) => {
+    if ((target as HTMLElement).closest(NOT_A_SHOT)) {
+      return;
     }
-  })();
+    // Measure the canvas at click time: the page layout shifts (setup panel
+    // hiding, status text changing, scrolling), so a position captured when
+    // the stream was created goes stale.
+    const rect = canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) * canvas.width) / rect.width;
+    const y = ((clientY - rect.top) * canvas.height) / rect.height;
+    queue.push({ entityId, x, y: canvas.height - y });
+  });
+  return stream(() => queue.shift());
 }
 
-export function getRemoteClickStream(channel: RTCDataChannel) {
-  return (function* () {
-    const queue: Click[] = [];
+// ---------- The other player's controls (from the network) ----------
 
-    channel.addEventListener("message", (e) => {
-      const { click } = JSON.parse(e.data);
+// The most recent input the guest reported. Input is state, not events, so
+// holding the latest value is right: it keeps applying until a new one comes.
+export function getRemoteInputStream(channel: RTCDataChannel) {
+  let latest: Input = { keys: new Set(), stick: { x: 0, y: 0 } };
+  let lastN = -1;
 
-      if (click) {
-        queue.push(click);
-      }
-    });
-
-    while (true) {
-      yield queue.shift();
+  channel.addEventListener("message", ({ data }) => {
+    const message = decodeInput(data);
+    // The channel is unordered, so ignore input older than what we have.
+    if (!message || message.n <= lastN) {
+      return;
     }
-  })();
+    lastN = message.n;
+    latest = { keys: new Set(message.keys), stick: message.stick };
+  });
+
+  return stream(() => latest);
+}
+
+export function getRemoteClickStream(channel: RTCDataChannel, entityId: string) {
+  const queue: Click[] = [];
+  channel.addEventListener("message", ({ data }) => {
+    const click = decodeClick(data, entityId);
+    if (click) {
+      queue.push(click);
+    }
+  });
+  return stream(() => queue.shift());
 }

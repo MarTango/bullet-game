@@ -1,12 +1,8 @@
+export type Role = "host" | "guest";
+
 export interface Score {
   host: number;
   guest: number;
-}
-
-export interface State {
-  ctx: CanvasRenderingContext2D;
-  entities: Entity[];
-  score: Score;
 }
 
 export interface Entity {
@@ -19,13 +15,17 @@ export interface Entity {
   color: string;
 }
 
+export interface State {
+  ctx: CanvasRenderingContext2D;
+  entities: Entity[];
+  score: Score;
+}
+
 export interface Click {
   entityId: string;
   x: number;
   y: number;
 }
-
-export type Keys = { [id: string]: Set<number> };
 
 // Analog stick tilt, each axis in [-1, 1] (y up, matching the board).
 export interface Stick {
@@ -33,12 +33,19 @@ export interface Stick {
   y: number;
 }
 
-export type Sticks = { [id: string]: Stick };
+// Everything a player is doing with their controls right now.
+export interface Input {
+  keys: Set<number>;
+  stick: Stick;
+}
 
+export type Inputs = { [playerId: string]: Input };
+
+// What one frame of the simulation consumes; each transformation maps a Msg to
+// a new Msg.
 export interface Msg {
   board: State;
   dt?: number;
-  keys: Keys;
-  sticks: Sticks;
+  inputs: Inputs;
   clicks: Click[];
 }

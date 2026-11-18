@@ -1,79 +1,46 @@
+import { GUEST, HOST, PLAYER_COLORS, PLAYER_RADIUS } from "./config";
 import {
-  dtStream,
+  drain,
   getClickStream,
-  getLocalKeysPressedStream,
-  getLocalStickStream,
-  getRemoteStickStream,
+  getDtStream,
+  getLocalInputStream,
 } from "./streams";
-import {
-  afterBouncing,
-  afterCollisions,
-  afterTimeStep,
-  afterKeysPressed,
-  afterClicks,
-} from "./transformations";
-import { Entity, Msg, State } from "./types";
+import { simulate } from "./transformations";
+import { Click, Entity, Input, Score, State } from "./types";
 
+// Runs the game on the host: every animation frame, gather everyone's input,
+// advance the simulation, and hand the new board to `onBoardUpdate`.
 export function start({
   board,
   onBoardUpdate,
-  remoteKeysStream,
-  remoteStickStream,
-  remoteClickStream,
-  shouldReset,
-  reset,
+  remoteInput,
+  remoteClicks,
+  consumeReset,
   shouldStop,
 }: {
   board: State;
-  onBoardUpdate: (b: State) => void;
-  remoteKeysStream: ReturnType<typeof getLocalKeysPressedStream>;
-  remoteStickStream: ReturnType<typeof getRemoteStickStream>;
-  remoteClickStream: Iterator<Msg["clicks"][0]>;
-  shouldReset: () => boolean;
-  reset: () => void;
+  onBoardUpdate: (board: State) => void;
+  remoteInput: Iterator<Input>;
+  remoteClicks: Iterator<Click | undefined>;
+  // True once if a reset was requested since the last frame.
+  consumeReset: () => boolean;
   shouldStop: () => boolean;
 }) {
-  const id = "host";
+  const dt = getDtStream();
+  const localInput = getLocalInputStream();
+  const localClicks = getClickStream(HOST, board.ctx.canvas);
 
-  // Composition of all transformers
-  const update: (e: Msg) => Msg = [
-    afterClicks,
-    afterKeysPressed,
-    afterCollisions,
-    afterBouncing,
-    afterTimeStep,
-  ].reduce((f, g) => {
-    return (msg: Msg) => f(g(msg));
-  });
-
-  const clickStream = getClickStream(id, board.ctx.canvas);
-  const keysPressedStream = getLocalKeysPressedStream();
-  const stickStream = getLocalStickStream();
-
-  requestAnimationFrame(async function frame() {
+  requestAnimationFrame(function frame() {
     if (shouldStop()) {
       return;
     }
-    const msg: Msg = {
+    const { board: next } = simulate({
       board,
-      dt: dtStream.next().value,
-      keys: {
-        host: keysPressedStream.next().value,
-        guest: remoteKeysStream.next().value,
-      },
-      sticks: {
-        host: stickStream.next().value,
-        guest: remoteStickStream.next().value,
-      },
-      clicks: [clickStream.next().value, remoteClickStream.next().value].filter(
-        (c) => c
-      ),
-    };
-    board = afterRound(update(msg).board);
-    if (shouldReset()) {
-      board = init();
-      reset();
-    }
+      dt: dt.next().value,
+      inputs: { host: localInput.next().value, guest: remoteInput.next().value },
+      clicks: [...drain(localClicks), ...drain(remoteClicks)],
+    });
+    board = consumeReset() ? init() : afterRound(next);
     onBoardUpdate(board);
     requestAnimationFrame(frame);
   });
@@ -82,72 +49,37 @@ export function start({
 // If a player has died, award the round to the survivor (nobody scores on a
 // double knockout) and immediately start a fresh round, keeping the score.
 function afterRound(board: State): State {
-  const hostAlive = board.entities.some((e) => e.id == "host");
-  const guestAlive = board.entities.some((e) => e.id == "guest");
+  const hostAlive = board.entities.some((e) => e.id == HOST);
+  const guestAlive = board.entities.some((e) => e.id == GUEST);
   if (hostAlive && guestAlive) {
     return board;
   }
-  return {
-    ...init(),
-    score: {
-      host: board.score.host + (hostAlive ? 1 : 0),
-      guest: board.score.guest + (guestAlive ? 1 : 0),
-    },
-  };
-}
-
-export function display(s: State) {
-  const { height: h, width: w } = s.ctx.canvas;
-  s.ctx.clearRect(0, 0, w, h);
-  if (s.score) {
-    s.ctx.font = "20px sans-serif";
-    s.ctx.textAlign = "center";
-    s.ctx.fillStyle = "#555";
-    s.ctx.fillText(
-      `Red ${s.score.host} – ${s.score.guest} Yellow`,
-      w / 2,
-      28
-    );
-  }
-  s.entities.forEach((b) => {
-    s.ctx.beginPath();
-    s.ctx.arc(b.x, h - b.y, b.r, 0, 2 * Math.PI);
-    s.ctx.fillStyle = b.color;
-    s.ctx.fill();
-    s.ctx.strokeStyle = "black";
-    s.ctx.stroke();
-    s.ctx.closePath();
+  return init({
+    host: board.score.host + (hostAlive ? 1 : 0),
+    guest: board.score.guest + (guestAlive ? 1 : 0),
   });
 }
 
-export function init(): State {
-  const canvas: HTMLCanvasElement = document.querySelector("canvas");
-  const ctx = canvas.getContext("2d");
-  const { width: w, height: h } = canvas;
-  const players: Entity[] = [
-    {
-      id: "host",
-      x: w / 8,
-      y: Math.random() * h,
-      r: 10,
-      vx: 0,
-      vy: 0,
-      color: "red",
-    },
-    {
-      id: "guest",
-      x: (w * 7) / 8,
-      y: Math.random() * h,
-      r: 10,
-      vx: 0,
-      vy: 0,
-      color: "yellow",
-    },
-  ];
+// A fresh round: both players at random heights on their own side.
+export function init(score: Score = { host: 0, guest: 0 }): State {
+  const canvas = document.querySelector("canvas");
+  const { width, height } = canvas;
+  const player = (id: Entity["id"], x: number, color: string): Entity => ({
+    id,
+    x,
+    y: Math.random() * height,
+    r: PLAYER_RADIUS,
+    vx: 0,
+    vy: 0,
+    color,
+  });
 
   return {
-    ctx,
-    entities: players,
-    score: { host: 0, guest: 0 },
+    ctx: canvas.getContext("2d"),
+    entities: [
+      player(HOST, width / 8, PLAYER_COLORS.host),
+      player(GUEST, (width * 7) / 8, PLAYER_COLORS.guest),
+    ],
+    score,
   };
 }
