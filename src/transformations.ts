@@ -44,7 +44,7 @@ export function afterBouncing({ board, ...msg }: Msg): Msg {
       entities: board.entities.map(({ vx, vy, ...b }) => ({
         ...b,
         x: b.x < 0 ? 0 : b.x > w ? w : b.x,
-        y: b.y < 0 ? 0 : b.y > h ? w : b.y,
+        y: b.y < 0 ? 0 : b.y > h ? h : b.y,
         vx: b.x - b.r < 0 ? Math.abs(vx) : b.x + b.r > w ? -Math.abs(vx) : vx,
         vy: b.y - b.r < 0 ? Math.abs(vy) : b.y + b.r > h ? -Math.abs(vy) : vy,
       })),

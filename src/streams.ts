@@ -38,17 +38,16 @@ export function getLocalKeysPressedStream() {
 
 export function getRemoteKeysPressedStream(channel: RTCDataChannel) {
   return (function* () {
-    const keysPressedQueue: Set<number>[] = [];
+    // Keys are state, not events: hold the latest set the guest reported.
+    let latest = new Set<number>();
 
     channel.addEventListener("message", (e) => {
       const keysPressed: number[] = JSON.parse(e.data).keysPressed;
-      keysPressedQueue.push(new Set(keysPressed));
+      latest = new Set(keysPressed);
     });
 
-    const emptySet = new Set<number>();
-
     while (true) {
-      yield keysPressedQueue.pop() || emptySet;
+      yield latest;
     }
   })();
 }
@@ -65,7 +64,7 @@ export function getClickStream(
       queue.push({ entityId, x: offsetX, y: height - offsetY });
     });
     while (true) {
-      yield queue.pop();
+      yield queue.shift();
     }
   })();
 }
@@ -83,7 +82,7 @@ export function getRemoteClickStream(channel: RTCDataChannel) {
     });
 
     while (true) {
-      yield queue.pop();
+      yield queue.shift();
     }
   })();
 }
