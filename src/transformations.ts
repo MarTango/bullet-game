@@ -60,7 +60,7 @@ const [mvup, mvleft, mvright, mvdown] = [
   { vy: -v },
 ];
 
-export function afterKeysPressed({ board, keys, ...rest }: Msg): Msg {
+export function afterKeysPressed({ board, keys, sticks, ...rest }: Msg): Msg {
   const mapping: { [s: number]: Partial<Entity> } = {
     [keycodes.w]: mvup,
     [keycodes.a]: mvleft,
@@ -81,7 +81,13 @@ export function afterKeysPressed({ board, keys, ...rest }: Msg): Msg {
               ...prev,
               ...cur,
             }),
-            { ...player, vx: 0, vy: 0 }
+            // The analog stick sets a base velocity; held keys then
+            // override the axes they touch.
+            {
+              ...player,
+              vx: (sticks[id]?.x ?? 0) * v,
+              vy: (sticks[id]?.y ?? 0) * v,
+            }
           )
       );
     })
@@ -96,6 +102,7 @@ export function afterKeysPressed({ board, keys, ...rest }: Msg): Msg {
       ].filter((e) => e),
     },
     keys,
+    sticks,
     ...rest,
   };
 }

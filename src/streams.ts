@@ -1,4 +1,4 @@
-import { Click } from "./types";
+import { Click, Stick } from "./types";
 import { keycodes } from "./controls";
 const VALID_KEYS = new Set(Object.values(keycodes));
 
@@ -12,26 +12,74 @@ export const dtStream = (function* () {
   }
 })();
 
+// Keys currently held, shared by the keyboard handlers and the on-screen
+// touch buttons so both drive movement the same way.
+const heldKeys = new Set<number>();
+
+export function setKeyHeld(key: number, held: boolean) {
+  if (held) {
+    heldKeys.add(key);
+  } else {
+    heldKeys.delete(key);
+  }
+}
+
 export function getLocalKeysPressedStream() {
   return (function* () {
-    const keys = new Set<number>();
-
     window.addEventListener("keydown", (e) => {
-      const key = e.keyCode;
-      if (VALID_KEYS.has(key) && !keys.has(key)) {
-        keys.add(key);
+      if (VALID_KEYS.has(e.keyCode)) {
+        setKeyHeld(e.keyCode, true);
       }
     });
 
-    window.addEventListener("keyup", (e) => {
-      const key = e.keyCode;
-      if (keys.has(key)) {
-        keys.delete(key);
-      }
-    });
+    window.addEventListener("keyup", (e) => setKeyHeld(e.keyCode, false));
 
     while (true) {
-      yield keys;
+      yield heldKeys;
+    }
+  })();
+}
+
+// Analog stick tilt, written by the on-screen stick.
+const heldStick: Stick = { x: 0, y: 0 };
+
+export function setStick(x: number, y: number) {
+  heldStick.x = x;
+  heldStick.y = y;
+}
+
+export function getLocalStickStream() {
+  return (function* () {
+    while (true) {
+      yield heldStick;
+    }
+  })();
+}
+
+// The guest's value arrives over the network, so don't trust it: ignore
+// anything malformed and cap the strength at 1 (no speed hacks).
+function sanitizeStick(s?: Stick): Stick {
+  if (
+    !s ||
+    typeof s.x !== "number" ||
+    typeof s.y !== "number" ||
+    !isFinite(s.x) ||
+    !isFinite(s.y)
+  ) {
+    return { x: 0, y: 0 };
+  }
+  const len = Math.hypot(s.x, s.y);
+  return len > 1 ? { x: s.x / len, y: s.y / len } : { x: s.x, y: s.y };
+}
+
+export function getRemoteStickStream(channel: RTCDataChannel) {
+  return (function* () {
+    let latest: Stick = { x: 0, y: 0 };
+    channel.addEventListener("message", (e) => {
+      latest = sanitizeStick(JSON.parse(e.data).stick);
+    });
+    while (true) {
+      yield latest;
     }
   })();
 }
@@ -52,16 +100,22 @@ export function getRemoteKeysPressedStream(channel: RTCDataChannel) {
   })();
 }
 
-export function getClickStream(
-  entityId: string,
-  { offsetLeft, offsetTop, height }: HTMLCanvasElement
-) {
+export function getClickStream(entityId: string, canvas: HTMLCanvasElement) {
   return (function* () {
     const queue: Click[] = [];
-    window.addEventListener("mousedown", ({ pageX, pageY }) => {
-      const offsetX = pageX - offsetLeft;
-      const offsetY = pageY - offsetTop;
-      queue.push({ entityId, x: offsetX, y: height - offsetY });
+    // Pointer events cover both mouse clicks and touch taps. Presses on
+    // buttons, the move pad and form fields aren't shots.
+    window.addEventListener("pointerdown", ({ clientX, clientY, target }) => {
+      if ((target as HTMLElement).closest("button, textarea")) {
+        return;
+      }
+      // Measure the canvas at click time: the page layout shifts (setup panel
+      // hiding, status text changing, scrolling), so a position captured when
+      // the stream was created goes stale.
+      const rect = canvas.getBoundingClientRect();
+      const x = ((clientX - rect.left) * canvas.width) / rect.width;
+      const y = ((clientY - rect.top) * canvas.height) / rect.height;
+      queue.push({ entityId, x, y: canvas.height - y });
     });
     while (true) {
       yield queue.shift();

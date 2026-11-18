@@ -2,13 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bullet Game</title>
   </head>
   <body>
     <div id="app">
       <div>
         <button id="reset" style="display: none">Reset</button>
+        <button id="mute" style="display: none">Mute mic</button>
         <p id="status">Host a new game, or join a friend's.</p>
+        <p id="mic-note"></p>
 
         <div id="setup">
           <div id="choose">
@@ -18,37 +21,94 @@
 
           <div id="host-flow" style="display: none">
             <p>1. Send this game code to your friend:</p>
-            <textarea id="offer-out" rows="3" cols="60" readonly></textarea>
+            <textarea id="offer-out" rows="3" readonly></textarea>
             <button id="copy-offer">Copy</button>
             <p>2. Paste the answer code they send back:</p>
-            <textarea id="answer-in" rows="3" cols="60"></textarea>
+            <textarea id="answer-in" rows="3"></textarea>
             <button id="accept-answer">Connect</button>
           </div>
 
           <div id="guest-flow" style="display: none">
             <p>1. Paste the game code from the host:</p>
-            <textarea id="offer-in" rows="3" cols="60"></textarea>
+            <textarea id="offer-in" rows="3"></textarea>
             <button id="create-answer">Create answer</button>
             <div id="answer-out-wrap" style="display: none">
               <p>2. Send this answer code back to the host:</p>
-              <textarea id="answer-out" rows="3" cols="60" readonly></textarea>
+              <textarea id="answer-out" rows="3" readonly></textarea>
               <button id="copy-answer">Copy</button>
             </div>
           </div>
         </div>
 
         <canvas height="640" width="640"></canvas>
+
+        <div id="stick" style="display: none"><div id="knob"></div></div>
       </div>
     </div>
 
     <style>
+      html {
+        /* No pull-to-refresh or rubber-banding. */
+        overscroll-behavior: none;
+      }
+      /* Once a game is running, touches belong to the game: no scrolling,
+         pinch/double-tap zoom, text selection or long-press menus. */
+      body.playing {
+        touch-action: none;
+        overscroll-behavior: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+      @media (pointer: coarse) {
+        /* Keep arena + stick on screen together so nothing needs scrolling. */
+        body.playing canvas {
+          max-width: min(100%, max(240px, calc(100vh - 340px)));
+          max-width: min(100%, max(240px, calc(100dvh - 340px)));
+        }
+      }
       canvas {
         background: #eee;
         display: block;
+        /* Shrink to fit narrow screens; clicks are mapped back to 640x640. */
+        max-width: 100%;
+        height: auto;
+        /* Taps are shots, so don't let them scroll or zoom the page. */
+        touch-action: none;
       }
       textarea {
+        display: block;
+        width: 100%;
+        max-width: 640px;
+        box-sizing: border-box;
         font-family: monospace;
-        vertical-align: top;
+        /* 16px stops iOS zooming the page when a field is focused. */
+        font-size: 16px;
+        margin-bottom: 4px;
+      }
+      #stick {
+        position: relative;
+        width: 160px;
+        height: 160px;
+        margin: 16px auto;
+        border-radius: 50%;
+        background: #ddd;
+        border: 2px solid #bbb;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+      #knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 64px;
+        height: 64px;
+        margin: -32px 0 0 -32px;
+        border-radius: 50%;
+        background: #888;
+        pointer-events: none;
       }
     </style>
   </body>

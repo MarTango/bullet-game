@@ -3,7 +3,10 @@ import {
   getClickStream,
   getLocalKeysPressedStream,
   getRemoteClickStream,
+  getLocalStickStream,
   getRemoteKeysPressedStream,
+  getRemoteStickStream,
+  setStick,
 } from "./streams";
 import { decodeCode, encodeCode, waitForIce } from "./signaling";
 
@@ -26,13 +29,54 @@ const setStatus = (msg: string, isError = false) => {
 const show = (id: string, visible = true) =>
   ($(id).style.display = visible ? "" : "none");
 
-async function addTracks(pc: RTCPeerConnection) {
+const MIC_TIMEOUT_MS = 15000;
+
+// Our own mic tracks, kept so the mute button can switch them off.
+const localTracks: MediaStreamTrack[] = [];
+
+function setMuted(muted: boolean) {
+  // Disabling a track sends silence without renegotiating the connection.
+  localTracks.forEach((t) => (t.enabled = !muted));
+  $("mute").textContent = muted ? "Unmute mic" : "Mute mic";
+  $("mic-note").textContent = muted
+    ? "Microphone muted."
+    : "Microphone on: voice chat enabled.";
+}
+
+// Adds the local mic to the connection. Resolves false (never throws) if the
+// mic is denied, missing, or the permission prompt is left unanswered, so the
+// game can always continue without voice chat.
+async function addTracks(pc: RTCPeerConnection): Promise<boolean> {
+  let timedOut = false;
+  let timer: number;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-    console.log("Added Track");
+    $("mic-note").textContent =
+      "Waiting for microphone permission (you can play without it)…";
+    const request = navigator.mediaDevices.getUserMedia({ audio: true });
+    const timeout = new Promise<never>((_, reject) => {
+      timer = window.setTimeout(() => {
+        timedOut = true;
+        reject(new Error("Microphone permission prompt timed out"));
+      }, MIC_TIMEOUT_MS);
+    });
+    // If the prompt is answered after we gave up, release the mic again.
+    request.then(
+      (s) => timedOut && s.getTracks().forEach((t) => t.stop()),
+      () => {}
+    );
+    const stream = await Promise.race([request, timeout]);
+    stream.getTracks().forEach((t) => {
+      pc.addTrack(t, stream);
+      localTracks.push(t);
+    });
+    $("mic-note").textContent = "Microphone on: voice chat enabled.";
+    return true;
   } catch (err) {
     console.error(err);
+    $("mic-note").textContent = "Microphone unavailable: voice chat is off for you.";
+    return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -63,11 +107,89 @@ function newConnection(name: string) {
   return pc;
 }
 
+// iOS Safari ignores `touch-action` for page scrolling in places, so also
+// cancel touch scrolling directly while a game is running.
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    if (document.body.classList.contains("playing")) {
+      e.preventDefault();
+    }
+  },
+  { passive: false }
+);
+
 function onConnected(role: string) {
+  document.body.classList.add("playing");
   show("setup", false);
   show("reset", role == "host");
-  setStatus(`Connected! You are the ${role}.`);
+  show("mute", localTracks.length > 0);
+  if (isTouchDevice) {
+    show("stick");
+    setStatus(
+      `Connected! You are the ${role}. Use the stick to move and tap the arena to shoot.`
+    );
+  } else {
+    setStatus(`Connected! You are the ${role}.`);
+  }
 }
+
+const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+
+// On-screen analog stick: drag the knob; tilt direction and strength set the
+// movement direction and speed. Pointer capture keeps tracking the finger
+// even if it slides outside the base.
+(function wireStick() {
+  const base = $("stick");
+  const knob = $("knob");
+  const DEAD_ZONE = 0.15;
+  let activePointer: number | null = null;
+
+  const update = (e: PointerEvent) => {
+    const rect = base.getBoundingClientRect();
+    const travel = rect.width / 2 - knob.offsetWidth / 2;
+    let nx = (e.clientX - (rect.left + rect.width / 2)) / travel;
+    let ny = (e.clientY - (rect.top + rect.height / 2)) / travel;
+    const len = Math.hypot(nx, ny);
+    if (len > 1) {
+      nx /= len;
+      ny /= len;
+    }
+    knob.style.transform = `translate(${nx * travel}px, ${ny * travel}px)`;
+    // Screen y points down, board y points up.
+    setStick(
+      Math.hypot(nx, ny) < DEAD_ZONE ? 0 : nx,
+      Math.hypot(nx, ny) < DEAD_ZONE ? 0 : -ny
+    );
+  };
+
+  const release = (e: PointerEvent) => {
+    if (e.pointerId !== activePointer) {
+      return;
+    }
+    activePointer = null;
+    knob.style.transform = "";
+    setStick(0, 0);
+  };
+
+  base.addEventListener("pointerdown", (e) => {
+    if (activePointer !== null) {
+      return;
+    }
+    e.preventDefault();
+    activePointer = e.pointerId;
+    base.setPointerCapture(e.pointerId);
+    update(e);
+  });
+  base.addEventListener("pointermove", (e) => {
+    if (e.pointerId === activePointer) {
+      update(e);
+    }
+  });
+  base.addEventListener("pointerup", release);
+  base.addEventListener("pointercancel", release);
+  base.addEventListener("contextmenu", (e) => e.preventDefault());
+})();
 
 function wireCopy(buttonId: string, textareaId: string) {
   $(buttonId).onclick = async () => {
@@ -113,11 +235,16 @@ async function createGame() {
   setStatus("Creating game code…");
 
   const pc = (hostPc = newConnection("host"));
-  await addTracks(pc);
+  // Without a mic we still need an audio section in the offer, otherwise a
+  // guest with a mic would have nowhere to send their audio.
+  if (!(await addTracks(pc))) {
+    pc.addTransceiver("audio", { direction: "recvonly" });
+  }
   onTrack(pc, "HOST");
 
   const channel = pc.createDataChannel("entities");
   const remoteKeysStream = getRemoteKeysPressedStream(channel);
+  const remoteStickStream = getRemoteStickStream(channel);
   const remoteClickStream = getRemoteClickStream(channel);
 
   channel.onopen = () => {
@@ -127,9 +254,12 @@ async function createGame() {
       board: init(),
       onBoardUpdate: (board) => {
         display(board);
-        channel.send(JSON.stringify(board.entities));
+        channel.send(
+          JSON.stringify({ entities: board.entities, score: board.score })
+        );
       },
       remoteKeysStream,
+      remoteStickStream,
       remoteClickStream,
       shouldReset: () => reset,
       reset: () => (reset = false),
@@ -173,11 +303,13 @@ async function createAnswer() {
     const ctx = canvas.getContext("2d");
 
     channel.addEventListener("message", (b: MessageEvent) => {
-      display({ ctx, entities: JSON.parse(b.data) });
+      const { entities, score } = JSON.parse(b.data);
+      display({ ctx, entities, score });
     });
 
     const clickStream = getClickStream("guest", canvas);
     const keysPressedStream = getLocalKeysPressedStream();
+    const stickStream = getLocalStickStream();
     const beginSending = () => {
       onConnected("guest");
       requestAnimationFrame(function send() {
@@ -187,6 +319,7 @@ async function createAnswer() {
         channel.send(
           JSON.stringify({
             keysPressed: Array.from(keysPressedStream.next().value),
+            stick: { ...stickStream.next().value },
             click: clickStream.next().value,
           })
         );
@@ -217,6 +350,7 @@ async function createAnswer() {
 
 // ---------- UI wiring ----------
 
+$("mute").onclick = () => setMuted(localTracks.some((t) => t.enabled));
 $("create-game").onclick = guarded(createGame);
 $("accept-answer").onclick = guarded(acceptAnswer);
 $("join-game").onclick = () => {
