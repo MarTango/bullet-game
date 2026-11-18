@@ -77,8 +77,17 @@ function sanitizeStick(s?: Stick): Stick {
 export function getRemoteStickStream(channel: RTCDataChannel) {
   return (function* () {
     let latest: Stick = { x: 0, y: 0 };
+    let lastN = -1;
     channel.addEventListener("message", (e) => {
-      latest = sanitizeStick(JSON.parse(e.data).stick);
+      const msg = JSON.parse(e.data);
+      // The channel is unordered, so ignore input older than what we have.
+      if (typeof msg.n == "number") {
+        if (msg.n <= lastN) {
+          return;
+        }
+        lastN = msg.n;
+      }
+      latest = sanitizeStick(msg.stick);
     });
     while (true) {
       yield latest;
@@ -90,10 +99,17 @@ export function getRemoteKeysPressedStream(channel: RTCDataChannel) {
   return (function* () {
     // Keys are state, not events: hold the latest set the guest reported.
     let latest = new Set<number>();
+    let lastN = -1;
 
     channel.addEventListener("message", (e) => {
-      const keysPressed: number[] = JSON.parse(e.data).keysPressed;
-      latest = new Set(keysPressed);
+      const msg = JSON.parse(e.data);
+      if (typeof msg.n == "number") {
+        if (msg.n <= lastN) {
+          return;
+        }
+        lastN = msg.n;
+      }
+      latest = new Set<number>(msg.keysPressed);
     });
 
     while (true) {

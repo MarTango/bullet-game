@@ -9,6 +9,7 @@ import {
   setStick,
 } from "./streams";
 import { initChat } from "./chat";
+import { decodeFrame, encodeFrame, isNewer } from "./protocol";
 import { decodeCode, encodeCode, waitForIce } from "./signaling";
 
 const w: any = window;
@@ -48,6 +49,9 @@ const setStatus = (msg: string, isError = false) => {
 
 const show = (id: string, visible = true) =>
   ($(id).style.display = visible ? "" : "none");
+
+// Don't queue more than this many bytes of game state for a slow connection.
+const MAX_BUFFERED = 16 * 1024;
 
 let wasConnected = false;
 let connectionEnded = false;
@@ -224,13 +228,22 @@ async function createGame() {
 
   const pc = (hostPc = newConnection("host"));
 
-  const channel = pc.createDataChannel("entities");
+  // Game state is sent every frame, so a lost packet is better skipped than
+  // retransmitted (the next frame replaces it): unordered, no retries.
+  const channel = pc.createDataChannel("entities", {
+    ordered: false,
+    maxRetransmits: 0,
+  });
+  // Clicks are one-off events, so they get a reliable channel of their own.
+  const events = pc.createDataChannel("events");
   initChat(pc.createDataChannel("chat"), "Red", "Yellow");
   const remoteKeysStream = getRemoteKeysPressedStream(channel);
   const remoteStickStream = getRemoteStickStream(channel);
-  const remoteClickStream = getRemoteClickStream(channel);
+  const remoteClickStream = getRemoteClickStream(events);
 
   channel.onclose = endConnection;
+  events.onclose = endConnection;
+  let seq = 0;
 
   channel.onopen = () => {
     console.log("HOST: Channel open, starting game and sending entities");
@@ -239,10 +252,9 @@ async function createGame() {
       board: init(),
       onBoardUpdate: (board) => {
         display(board);
-        if (channel.readyState == "open") {
-          channel.send(
-            JSON.stringify({ entities: board.entities, score: board.score })
-          );
+        // Skip a frame rather than queue it if the link can't keep up.
+        if (channel.readyState == "open" && channel.bufferedAmount < MAX_BUFFERED) {
+          channel.send(encodeFrame(seq++, board.score, board.entities));
         }
       },
       remoteKeysStream,
@@ -284,38 +296,68 @@ async function createAnswer() {
   setStatus("Creating answer code…");
 
   const pc = newConnection("guest");
+  let events: RTCDataChannel;
   pc.ondatachannel = (e) => {
     console.log("Got datachannel from host", e);
-    if (e.channel.label == "chat") {
-      initChat(e.channel, "Yellow", "Red");
+    const channel = e.channel;
+    if (channel.label == "chat") {
+      initChat(channel, "Yellow", "Red");
       return;
     }
-    const channel = e.channel;
+    if (channel.label == "events") {
+      events = channel;
+      channel.addEventListener("close", endConnection);
+      return;
+    }
+
     const canvas: HTMLCanvasElement = document.querySelector("canvas");
     const ctx = canvas.getContext("2d");
 
+    channel.binaryType = "arraybuffer";
     channel.addEventListener("close", endConnection);
+    let lastSeq: number | null = null;
     channel.addEventListener("message", (b: MessageEvent) => {
-      const { entities, score } = JSON.parse(b.data);
-      display({ ctx, entities, score });
+      if (!(b.data instanceof ArrayBuffer)) {
+        return;
+      }
+      const frame = decodeFrame(b.data);
+      // Drop malformed frames, and frames that arrive after a newer one.
+      if (!frame || (lastSeq !== null && !isNewer(frame.seq, lastSeq))) {
+        return;
+      }
+      lastSeq = frame.seq;
+      display({ ctx, entities: frame.entities, score: frame.score });
     });
 
     const clickStream = getClickStream("guest", canvas);
     const keysPressedStream = getLocalKeysPressedStream();
     const stickStream = getLocalStickStream();
+    let n = 0;
     const beginSending = () => {
       onConnected("guest");
       requestAnimationFrame(function send() {
         if (channel.readyState != "open") {
           return;
         }
-        channel.send(
-          JSON.stringify({
-            keysPressed: Array.from(keysPressedStream.next().value),
-            stick: { ...stickStream.next().value },
-            click: clickStream.next().value,
-          })
-        );
+        // Input state goes out every frame (a lost one is replaced by the
+        // next), numbered so the host can ignore any that arrive out of order.
+        if (channel.bufferedAmount < MAX_BUFFERED) {
+          channel.send(
+            JSON.stringify({
+              n: n++,
+              keysPressed: Array.from(keysPressedStream.next().value),
+              stick: { ...stickStream.next().value },
+            })
+          );
+        }
+        // Clicks are events and must not be lost: reliable channel, and
+        // drain every click queued since the last frame.
+        let click;
+        while ((click = clickStream.next().value)) {
+          if (events && events.readyState == "open") {
+            events.send(JSON.stringify({ click }));
+          }
+        }
         requestAnimationFrame(send);
       });
     };
