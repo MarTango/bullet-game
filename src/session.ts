@@ -66,20 +66,45 @@ export function onConnected(role: Role) {
   );
 }
 
-// iOS Safari ignores `touch-action` for page scrolling in places, so also
-// cancel touch scrolling directly while a game is running.
+const DOUBLE_TAP_MS = 350;
+
+// While a game is running, touches belong to the game: no scrolling or zooming.
+// iOS Safari doesn't reliably honour `touch-action` for these, so cancel them
+// directly. This matters because the page can't be pinched back out once it's
+// locked, so an accidental zoom would leave the player stuck.
 export function lockPageWhilePlaying() {
+  const playing = () => document.body.classList.contains("playing");
+  const options = { passive: false };
+
   document.addEventListener(
     "touchmove",
     (e) => {
-      const target = e.target as HTMLElement;
-      if (
-        document.body.classList.contains("playing") &&
-        !target.closest("#chat-log")
-      ) {
+      const inChatLog = (e.target as HTMLElement).closest("#chat-log");
+      if (playing() && !inChatLog) {
         e.preventDefault();
       }
     },
-    { passive: false }
+    options
+  );
+
+  // Two quick taps (easy to do with a thumb on the stick) zoom the page.
+  // The game reads pointer events, which have already fired by touchend, so
+  // cancelling this doesn't affect shooting or steering.
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    "touchend",
+    (e) => {
+      const now = Date.now();
+      if (playing() && now - lastTouchEnd < DOUBLE_TAP_MS) {
+        e.preventDefault();
+      }
+      lastTouchEnd = now;
+    },
+    options
+  );
+
+  // Safari's own pinch-zoom events.
+  ["gesturestart", "gesturechange", "gestureend"].forEach((type) =>
+    document.addEventListener(type, (e) => playing() && e.preventDefault())
   );
 }
