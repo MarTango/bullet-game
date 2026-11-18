@@ -61,8 +61,9 @@
 
     <style>
       html {
-        /* No pull-to-refresh or rubber-banding. */
+        /* No pull-to-refresh or rubber-banding, and no double-tap zoom. */
         overscroll-behavior: none;
+        touch-action: manipulation;
       }
       /* Once a game is running, touches belong to the game: no scrolling,
          pinch/double-tap zoom, text selection or long-press menus. */
