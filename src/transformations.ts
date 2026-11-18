@@ -54,7 +54,7 @@ function bounce(pos: number, vel: number, r: number, max: number) {
 }
 
 export function afterBouncing({ board, ...msg }: Msg): Msg {
-  const { width, height } = board.ctx.canvas;
+  const { width, height } = board.arena;
 
   return {
     ...msg,

@@ -12,6 +12,9 @@ export const setStatus = (message: string, isError = false) => {
 export const show = (id: string, visible = true) =>
   ($(id).style.display = visible ? "" : "none");
 
+export const canvas = document.querySelector("canvas");
+export const ctx = canvas.getContext("2d");
+
 export const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
 
 let busy = false;

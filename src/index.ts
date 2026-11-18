@@ -1,9 +1,12 @@
+import { ARENA } from "./config";
 import { createAnswer } from "./guest";
 import { acceptAnswer, createGame } from "./host";
 import { lockPageWhilePlaying } from "./session";
 import { initStick } from "./stick";
-import { $, guarded, setStatus, show, wireCopy } from "./ui";
+import { $, canvas, guarded, setStatus, show, wireCopy } from "./ui";
 
+canvas.width = ARENA.width;
+canvas.height = ARENA.height;
 lockPageWhilePlaying();
 initStick();
 

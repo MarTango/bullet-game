@@ -15,11 +15,20 @@ export interface Entity {
   color: string;
 }
 
+export interface Arena {
+  width: number;
+  height: number;
+}
+
+// The whole game at one moment: plain data, no DOM objects.
 export interface State {
-  ctx: CanvasRenderingContext2D;
+  arena: Arena;
   entities: Entity[];
   score: Score;
 }
+
+// What's needed to draw a frame (the guest has no arena or physics, only this).
+export type Scene = Pick<State, "entities" | "score">;
 
 export interface Click {
   entityId: string;

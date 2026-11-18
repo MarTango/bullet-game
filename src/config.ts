@@ -1,4 +1,4 @@
-import { Role } from "./types";
+import { Arena, Role, Score } from "./types";
 
 export const HOST: Role = "host";
 export const GUEST: Role = "guest";
@@ -14,6 +14,11 @@ export const PLAYER_COLORS: { [role in Role]: string } = {
   host: "red",
   guest: "yellow",
 };
+
+// The playing field, in pixels. The canvas is sized from this at startup.
+export const ARENA: Arena = { width: 640, height: 640 };
+
+export const NO_SCORE: Score = Object.freeze({ host: 0, guest: 0 });
 
 // Speeds are in pixels per millisecond.
 export const PLAYER_RADIUS = 10;

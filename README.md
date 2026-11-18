@@ -38,11 +38,12 @@ configured in `src/ice.ts`.
 | File | Role |
 |------|------|
 | `src/transformations.ts` | The game rules, as pure functions over a `Msg` |
-| `src/game.ts` | Host game loop, rounds and scoring |
+| `src/round.ts` | Starting rounds and scoring, as pure functions (randomness passed in) |
+| `src/game.ts` | Host game loop: the impure shell around the pure rules |
 | `src/render.ts` | Canvas drawing |
 | `src/streams.ts` | Per-frame input sources (keyboard, stick, clicks, network) |
 | `src/protocol.ts` | Everything sent over the network, with validation |
-| `src/config.ts` | Gameplay constants |
+| `src/config.ts` | Gameplay constants, including the arena size |
 | `src/host.ts`, `src/guest.ts` | Each role's connection setup |
 | `src/session.ts` | Connection lifecycle: connected, unstable, ended |
 | `src/signaling.ts` | Turns connection descriptions into copy-pasteable codes |

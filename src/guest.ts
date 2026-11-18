@@ -11,11 +11,10 @@ import {
 import { endSession, newConnection, onConnected } from "./session";
 import { decodeCode, encodeCode, waitForIce } from "./signaling";
 import { drain, getClickStream, getLocalInputStream } from "./streams";
-import { $, setStatus, show } from "./ui";
+import { $, canvas, ctx, setStatus, show } from "./ui";
 
 // Draws each game frame the host sends, skipping malformed or out-of-date ones.
 function showHostState(state: RTCDataChannel) {
-  const ctx = document.querySelector("canvas").getContext("2d");
   let lastSeq: number | null = null;
 
   state.binaryType = "arraybuffer";
@@ -25,14 +24,14 @@ function showHostState(state: RTCDataChannel) {
       return;
     }
     lastSeq = frame.seq;
-    display({ ctx, entities: frame.entities, score: frame.score });
+    display(ctx, frame);
   });
 }
 
 // Every frame, tells the host what this player's controls are doing.
 function sendInput(state: RTCDataChannel, getEvents: () => RTCDataChannel) {
   const input = getLocalInputStream();
-  const clicks = getClickStream(GUEST, document.querySelector("canvas"));
+  const clicks = getClickStream(GUEST, canvas);
   let n = 0;
 
   requestAnimationFrame(function send() {

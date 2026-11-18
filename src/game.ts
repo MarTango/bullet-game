@@ -1,4 +1,5 @@
-import { GUEST, HOST, PLAYER_COLORS, PLAYER_RADIUS } from "./config";
+import { HOST } from "./config";
+import { afterRound, firstRound } from "./round";
 import {
   drain,
   getClickStream,
@@ -6,29 +7,34 @@ import {
   getLocalInputStream,
 } from "./streams";
 import { simulate } from "./transformations";
-import { Click, Entity, Input, Score, State } from "./types";
+import { Click, Input, State } from "./types";
 
 // Runs the game on the host: every animation frame, gather everyone's input,
-// advance the simulation, and hand the new board to `onBoardUpdate`.
+// advance the simulation, and hand the new board to `onBoardUpdate`. This is
+// the impure shell around the pure rules in transformations.ts and round.ts.
 export function start({
-  board,
+  canvas,
   onBoardUpdate,
   remoteInput,
   remoteClicks,
   consumeReset,
   shouldStop,
+  random = Math.random,
 }: {
-  board: State;
+  // Clicks are measured against this; the game itself never touches it.
+  canvas: HTMLCanvasElement;
   onBoardUpdate: (board: State) => void;
   remoteInput: Iterator<Input>;
   remoteClicks: Iterator<Click | undefined>;
   // True once if a reset was requested since the last frame.
   consumeReset: () => boolean;
   shouldStop: () => boolean;
+  random?: () => number;
 }) {
   const dt = getDtStream();
   const localInput = getLocalInputStream();
-  const localClicks = getClickStream(HOST, board.ctx.canvas);
+  const localClicks = getClickStream(HOST, canvas);
+  let board = firstRound(random);
 
   requestAnimationFrame(function frame() {
     if (shouldStop()) {
@@ -40,46 +46,8 @@ export function start({
       inputs: { host: localInput.next().value, guest: remoteInput.next().value },
       clicks: [...drain(localClicks), ...drain(remoteClicks)],
     });
-    board = consumeReset() ? init() : afterRound(next);
+    board = consumeReset() ? firstRound(random) : afterRound(next, random);
     onBoardUpdate(board);
     requestAnimationFrame(frame);
   });
-}
-
-// If a player has died, award the round to the survivor (nobody scores on a
-// double knockout) and immediately start a fresh round, keeping the score.
-function afterRound(board: State): State {
-  const hostAlive = board.entities.some((e) => e.id == HOST);
-  const guestAlive = board.entities.some((e) => e.id == GUEST);
-  if (hostAlive && guestAlive) {
-    return board;
-  }
-  return init({
-    host: board.score.host + (hostAlive ? 1 : 0),
-    guest: board.score.guest + (guestAlive ? 1 : 0),
-  });
-}
-
-// A fresh round: both players at random heights on their own side.
-export function init(score: Score = { host: 0, guest: 0 }): State {
-  const canvas = document.querySelector("canvas");
-  const { width, height } = canvas;
-  const player = (id: Entity["id"], x: number, color: string): Entity => ({
-    id,
-    x,
-    y: Math.random() * height,
-    r: PLAYER_RADIUS,
-    vx: 0,
-    vy: 0,
-    color,
-  });
-
-  return {
-    ctx: canvas.getContext("2d"),
-    entities: [
-      player(HOST, width / 8, PLAYER_COLORS.host),
-      player(GUEST, (width * 7) / 8, PLAYER_COLORS.guest),
-    ],
-    score,
-  };
 }

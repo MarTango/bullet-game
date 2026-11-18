@@ -1,12 +1,12 @@
 import { initChat } from "./chat";
 import { GUEST, HOST, MAX_BUFFERED } from "./config";
+import { start } from "./game";
 import { display } from "./render";
-import { init, start } from "./game";
 import { CHANNELS, encodeFrame } from "./protocol";
 import { endSession, hasEnded, newConnection, onConnected } from "./session";
 import { decodeCode, encodeCode, waitForIce } from "./signaling";
 import { getRemoteClickStream, getRemoteInputStream } from "./streams";
-import { $, setStatus, show } from "./ui";
+import { $, canvas, ctx, setStatus, show } from "./ui";
 
 let pc: RTCPeerConnection;
 let resetRequested = false;
@@ -36,9 +36,9 @@ export async function createGame() {
   state.onopen = () => {
     onConnected(HOST);
     start({
-      board: init(),
+      canvas,
       onBoardUpdate: (board) => {
-        display(board);
+        display(ctx, board);
         // Skip a frame rather than queue it if the link can't keep up.
         if (state.readyState == "open" && state.bufferedAmount < MAX_BUFFERED) {
           state.send(encodeFrame(seq++, board.score, board.entities));
