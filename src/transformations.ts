@@ -1,7 +1,12 @@
 import { Msg, Entity } from "./types";
 import { keycodes } from "./controls";
 
+// Longest frame gap we simulate. After a background-tab pause dt can be
+// seconds long, which would teleport entities through walls and each other.
+const MAX_DT = 50;
+
 export function afterTimeStep({ dt = 0, board, ...msg }: Msg): Msg {
+  dt = Math.min(dt, MAX_DT);
   return {
     ...msg,
     dt,
@@ -120,6 +125,11 @@ export function afterClicks({ board, clicks, ...msg }: Msg): Msg {
       const relx = mx - p.x;
       const rely = my - p.y;
       const magnitude = Math.sqrt(relx * relx + rely * rely);
+      if (magnitude === 0) {
+        // Aimed exactly at the player's centre: no direction to fire in, and
+        // dividing by zero would turn the bullet's position into NaN.
+        return;
+      }
 
       const v = 0.4;
       const vx = relx / magnitude;
