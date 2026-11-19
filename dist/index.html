@@ -11,32 +11,30 @@
         <button id="reset" style="display: none">Reset</button>
         <button id="chat-toggle" style="display: none">Chat</button>
         <button id="restart" style="display: none">Start over</button>
-        <p id="status">Host a new game, or join a friend's.</p>
+        <p id="status">Pick a name and find someone to play.</p>
 
         <div id="setup">
-          <div id="choose">
-            <button id="create-game">Host a game</button>
-            <button id="join-game">Join a game</button>
-          </div>
-
-          <div id="host-flow" style="display: none">
-            <p>1. Send this game code to your friend:</p>
-            <textarea id="offer-out" rows="3" readonly></textarea>
-            <button id="copy-offer">Copy</button>
-            <p>2. Paste the answer code they send back:</p>
-            <textarea id="answer-in" rows="3"></textarea>
-            <button id="accept-answer">Connect</button>
-          </div>
-
-          <div id="guest-flow" style="display: none">
-            <p>1. Paste the game code from the host:</p>
-            <textarea id="offer-in" rows="3"></textarea>
-            <button id="create-answer">Create answer</button>
-            <div id="answer-out-wrap" style="display: none">
-              <p>2. Send this answer code back to the host:</p>
-              <textarea id="answer-out" rows="3" readonly></textarea>
-              <button id="copy-answer">Copy</button>
+          <form id="name-form">
+            <div id="choose">
+              <input
+                id="name-input"
+                maxlength="20"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Your name"
+              />
+              <button id="enter-lobby" type="button">Find players</button>
             </div>
+          </form>
+
+          <div id="lobby" style="display: none">
+            <div id="invites"></div>
+            <h3 id="lobby-name">Players online</h3>
+            <ul id="players"></ul>
+            <p id="players-empty">
+              Nobody else is here yet. Open this page on another device, or send
+              the link to a friend.
+            </p>
           </div>
         </div>
 
@@ -122,15 +120,37 @@
         /* Taps are shots, so don't let them scroll or zoom the page. */
         touch-action: none;
       }
-      textarea {
-        display: block;
-        width: 100%;
-        max-width: 640px;
-        box-sizing: border-box;
-        font-family: monospace;
+      #name-input {
         /* 16px stops iOS zooming the page when a field is focused. */
         font-size: 16px;
+      }
+      #players {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        max-width: 420px;
+      }
+      #players li,
+      #invites div {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #ddd;
+      }
+      #invites div {
+        background: #fff8d6;
+        padding: 6px 8px;
         margin-bottom: 4px;
+        max-width: 420px;
+        border-radius: 6px;
+      }
+      #players li span,
+      #invites div span {
+        flex: 1;
+        min-width: 0;
+        word-break: break-word;
       }
       #stick {
         position: relative;

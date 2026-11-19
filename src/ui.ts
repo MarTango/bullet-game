@@ -31,22 +31,9 @@ export function guarded(action: () => Promise<void>) {
     } catch (err) {
       console.error(err);
       setStatus(err.message || String(err), true);
+      show("restart");
     } finally {
       busy = false;
-    }
-  };
-}
-
-export function wireCopy(buttonId: string, textareaId: string) {
-  $(buttonId).onclick = async () => {
-    const textarea = $<HTMLTextAreaElement>(textareaId);
-    textarea.select();
-    try {
-      await navigator.clipboard.writeText(textarea.value);
-      setStatus("Copied to clipboard.");
-    } catch (err) {
-      // Clipboard API needs a secure context; fall back to the old way.
-      document.execCommand("copy");
     }
   };
 }

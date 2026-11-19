@@ -7,9 +7,12 @@ server: the two browsers connect directly with WebRTC.
 
 Go to <https://martango.github.io/bullet-game> to play.
 
-One player clicks **Host a game** and sends the code to a friend. The friend
-clicks **Join a game**, pastes it, and sends back the answer code. Paste that
-into the host's page and the game starts.
+Enter a name and click **Find players**. Everyone online is listed: click
+**Challenge** next to someone, and the game starts if they **Accept**.
+
+To play only with friends, share a link with your own lobby name, for example
+`https://martango.github.io/bullet-game/?lobby=my-friends`. Only people who open
+that link see each other.
 
 - **Move:** WASD, or the on-screen stick on a phone
 - **Shoot:** click or tap the arena
@@ -29,9 +32,17 @@ The host runs the whole simulation and the guest just draws what it's sent.
 | `events` | reliable    | guest → host: clicks |
 | `chat`   | reliable    | text messages |
 
-There is no signaling server: the connection codes are exchanged by hand.
-STUN (and a TURN relay for networks that block direct connections) is
+There is no server of our own. Players find each other through a free public
+MQTT broker (HiveMQ, see `src/signaling.ts`). Each player announces themselves
+on a shared lobby topic every few seconds, and challenges and connection offers
+go to a player's own inbox topic. That is a handful of small messages; once two
+players are connected both leave the lobby and everything goes directly between
+them. STUN (and a TURN relay for networks that block direct connections) is
 configured in `src/ice.ts`.
+
+The broker is a shared public service with no guarantees, and anyone can read
+or send messages on it. If it goes down, change `BROKER_URL` in
+`src/signaling.ts`.
 
 ### Code layout
 
@@ -46,7 +57,9 @@ configured in `src/ice.ts`.
 | `src/config.ts` | Gameplay constants, including the arena size |
 | `src/host.ts`, `src/guest.ts` | Each role's connection setup |
 | `src/session.ts` | Connection lifecycle: connected, unstable, ended |
-| `src/signaling.ts` | Turns connection descriptions into copy-pasteable codes |
+| `src/lobby.ts`, `src/lobby-view.ts` | Who is online, and the challenge/accept screen |
+| `src/signaling.ts` | Message formats and validation for the broker |
+| `src/mqtt.ts` | Minimal MQTT client (connect, subscribe, publish) |
 | `src/chat.ts`, `src/stick.ts`, `src/ui.ts` | Chat panel, on-screen stick, DOM helpers |
 
 ## Setting up

@@ -1,89 +1,137 @@
-// Manual signaling: WebRTC session descriptions are turned into short,
-// copy-pasteable codes that players exchange out-of-band (chat, etc.).
+// What players say to each other while finding a game and connecting.
 //
-// Code format: <kind><compressed>.<base64url payload>
-//   kind:       "O" (offer, host -> guest) or "A" (answer, guest -> host)
-//   compressed: "1" if deflate-raw compressed, "0" if plain UTF-8
+// Two kinds of message travel through the public MQTT broker:
+//   announcements  to the shared lobby topic, heard by everyone ("I'm here")
+//   direct         to one player's own inbox topic (a challenge, a connection
+//                  offer, ...)
+//
+// Everything arrives from the network, so the parsers accept only the exact
+// shapes we send and clean up what they accept.
 
-export type CodeKind = "O" | "A";
+export const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
 
-const w: any = window;
+const TOPIC_PREFIX = "bullet-game/v1";
+const MAX_SDP_LENGTH = 50_000;
+const MAX_NAME_LENGTH = 20;
 
-function toBase64Url(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) {
-    bin += String.fromCharCode(bytes[i]);
-  }
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const lobbyTopic = (room: string) => `${TOPIC_PREFIX}/${room}/lobby`;
+export const inboxTopic = (room: string, id: string) =>
+  `${TOPIC_PREFIX}/${room}/player/${id}`;
+
+export type Announcement =
+  | { type: "presence"; name: string; busy: boolean }
+  | { type: "who" }
+  | { type: "bye" };
+
+export type Direct =
+  | { type: "challenge"; name: string }
+  | { type: "accept" }
+  | { type: "decline" }
+  | { type: "cancel" }
+  | { type: "offer"; sdp: string }
+  | { type: "answer"; sdp: string };
+
+// Every message says who it's from.
+export type From<T> = T & { from: string };
+
+export const newPlayerId = () =>
+  Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
+
+const ID_PATTERN = /^[0-9a-f]{16}$/;
+
+export function cleanName(name: unknown): string {
+  const clean =
+    typeof name == "string"
+      ? name.replace(/\s+/g, " ").trim().slice(0, MAX_NAME_LENGTH)
+      : "";
+  return clean || "Player";
 }
 
-function fromBase64Url(s: string): Uint8Array {
-  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
-  const bin = atob(b64 + "===".slice((b64.length + 3) % 4));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    bytes[i] = bin.charCodeAt(i);
+function parseJson(payload: string): any {
+  try {
+    const message = JSON.parse(payload);
+    return message && ID_PATTERN.test(message.from) ? message : null;
+  } catch (err) {
+    return null;
   }
-  return bytes;
 }
 
-async function pipe(
-  stream: any,
-  bytes: Uint8Array
-): Promise<Uint8Array> {
-  const writer = stream.writable.getWriter();
-  writer.write(bytes);
-  writer.close();
-  return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+export function parseAnnouncement(payload: string): From<Announcement> | null {
+  const m = parseJson(payload);
+  switch (m?.type) {
+    case "presence":
+      return { type: "presence", from: m.from, name: cleanName(m.name), busy: m.busy === true };
+    case "who":
+    case "bye":
+      return { type: m.type, from: m.from };
+  }
+  return null;
 }
 
-export async function encodeCode(
-  kind: CodeKind,
-  desc: RTCSessionDescriptionInit
-): Promise<string> {
-  const raw = new TextEncoder().encode(desc.sdp);
-  if (w.CompressionStream) {
-    const packed = await pipe(new w.CompressionStream("deflate-raw"), raw);
-    return `${kind}1.${toBase64Url(packed)}`;
+export function parseDirect(payload: string): From<Direct> | null {
+  const m = parseJson(payload);
+  switch (m?.type) {
+    case "challenge":
+      return { type: "challenge", from: m.from, name: cleanName(m.name) };
+    case "accept":
+    case "decline":
+    case "cancel":
+      return { type: m.type, from: m.from };
+    case "offer":
+    case "answer":
+      return typeof m.sdp == "string" && m.sdp.length <= MAX_SDP_LENGTH
+        ? { type: m.type, from: m.from, sdp: m.sdp }
+        : null;
   }
-  return `${kind}0.${toBase64Url(raw)}`;
+  return null;
 }
 
-export async function decodeCode(
-  kind: CodeKind,
-  code: string
-): Promise<RTCSessionDescriptionInit> {
-  // Chat apps like to insert whitespace and line breaks.
-  const match = /^([OA])([01])\.([A-Za-z0-9_-]+)$/.exec(code.replace(/\s+/g, ""));
-  if (!match) {
-    throw new Error("That doesn't look like a valid code.");
-  }
-  const [, gotKind, compressed, payload] = match;
-  if (gotKind != kind) {
-    throw new Error(
-      kind == "O"
-        ? "That's an answer code. Paste the host's game code here."
-        : "That's a game code. Paste the guest's answer code here."
-    );
-  }
-  let bytes = fromBase64Url(payload);
-  if (compressed == "1") {
-    if (!w.DecompressionStream) {
-      throw new Error(
-        "This browser can't read the code. Try a recent Chrome, Edge, Firefox or Safari."
-      );
+// Holds messages until someone asks for them, so one that arrives before we
+// start waiting isn't lost.
+export class Mailbox {
+  private inbox: Direct[] = [];
+  private waiting: { type: string; resolve: (m: Direct) => void }[] = [];
+
+  push(message: Direct) {
+    const i = this.waiting.findIndex((w) => w.type == message.type);
+    if (i >= 0) {
+      this.waiting.splice(i, 1)[0].resolve(message);
+    } else {
+      this.inbox.push(message);
     }
-    bytes = await pipe(new w.DecompressionStream("deflate-raw"), bytes);
   }
-  return {
-    type: kind == "O" ? "offer" : "answer",
-    sdp: new TextDecoder().decode(bytes),
-  };
+
+  // The next message of this type, or an error if none comes in time.
+  next<T extends Direct["type"]>(
+    type: T,
+    timeoutMs: number
+  ): Promise<Extract<Direct, { type: T }>> {
+    return new Promise<any>((resolve, reject) => {
+      const i = this.inbox.findIndex((m) => m.type == type);
+      if (i >= 0) {
+        return resolve(this.inbox.splice(i, 1)[0]);
+      }
+      const entry = {
+        type: type as string,
+        resolve: (m: Direct) => {
+          clearTimeout(timer);
+          resolve(m);
+        },
+      };
+      const timer = setTimeout(() => {
+        this.waiting.splice(this.waiting.indexOf(entry), 1);
+        reject(new Error("The other player didn't respond. Try again."));
+      }, timeoutMs);
+      this.waiting.push(entry);
+    });
+  }
 }
 
-// Resolves once ICE gathering is done, so the SDP already contains every
-// candidate (there is no server to trickle them through). Falls back after a
-// timeout so a slow STUN server can't hang the UI forever.
+// Resolves once ICE gathering is done, so the session description already
+// contains every candidate and can go out as a single message. Falls back
+// after a timeout so a slow STUN server can't hang the UI forever.
 export function waitForIce(pc: RTCPeerConnection, timeoutMs = 4000) {
   return new Promise<void>((resolve) => {
     if (pc.iceGatheringState == "complete") {

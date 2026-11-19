@@ -9,9 +9,10 @@ import {
   isNewer,
 } from "./protocol";
 import { endSession, newConnection, onConnected } from "./session";
-import { decodeCode, encodeCode, waitForIce } from "./signaling";
+import { Link } from "./lobby";
+import { waitForIce } from "./signaling";
 import { drain, getClickStream, getLocalInputStream } from "./streams";
-import { $, canvas, ctx, setStatus, show } from "./ui";
+import { canvas, ctx, setStatus } from "./ui";
 
 // Draws each game frame the host sends, skipping malformed or out-of-date ones.
 function showHostState(state: RTCDataChannel) {
@@ -54,11 +55,10 @@ function sendInput(state: RTCDataChannel, getEvents: () => RTCDataChannel) {
   });
 }
 
-// Guest: take the host's game code, answer it, and show the answer as a code.
-export async function createAnswer() {
-  const offer = await decodeCode("O", $<HTMLTextAreaElement>("offer-in").value);
-  setStatus("Creating answer code…");
-
+// Guest: the player who accepted a challenge. Waits for the host's offer and
+// answers it.
+export async function joinGame(link: Link) {
+  setStatus("Connecting…");
   const pc = newConnection();
   let events: RTCDataChannel;
 
@@ -88,16 +88,10 @@ export async function createAnswer() {
     }
   };
 
-  await pc.setRemoteDescription(offer);
+  const offer = await link.next("offer");
+  await pc.setRemoteDescription({ type: "offer", sdp: offer.sdp });
   await pc.setLocalDescription(await pc.createAnswer());
   await waitForIce(pc);
-
-  $<HTMLTextAreaElement>("answer-out").value = await encodeCode(
-    "A",
-    pc.localDescription
-  );
-  show("answer-out-wrap");
-  setStatus(
-    "Send this answer code back to the host. The game starts once they paste it."
-  );
+  link.send({ type: "answer", sdp: pc.localDescription.sdp });
+  link.leave();
 }
