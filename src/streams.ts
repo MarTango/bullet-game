@@ -41,37 +41,51 @@ export function setStick(x: number, y: number) {
   heldStick.y = y;
 }
 
+let listeningToKeys = false;
+
 export function getLocalInputStream() {
-  window.addEventListener("keydown", (e) => {
-    // Typing "wasd" into the chat box shouldn't move the player.
-    const typing = (e.target as HTMLElement).closest("input, textarea");
-    if (VALID_KEYS.has(e.keyCode) && !typing) {
-      heldKeys.add(e.keyCode);
-    }
-  });
-  window.addEventListener("keyup", (e) => heldKeys.delete(e.keyCode));
+  if (!listeningToKeys) {
+    listeningToKeys = true;
+    window.addEventListener("keydown", (e) => {
+      // Typing "wasd" into the chat box shouldn't move the player.
+      const typing = (e.target as HTMLElement).closest("input, textarea");
+      if (VALID_KEYS.has(e.keyCode) && !typing) {
+        heldKeys.add(e.keyCode);
+      }
+    });
+    window.addEventListener("keyup", (e) => heldKeys.delete(e.keyCode));
+  }
 
   return stream((): Input => ({ keys: heldKeys, stick: heldStick }));
 }
 
 // Presses on these are using the interface, not shooting.
-const NOT_A_SHOT = "button, input, textarea, #chat, #stick";
+const NOT_A_SHOT = "button, input, textarea, #chat, #stick, #setup";
 
-export function getClickStream(entityId: string, canvas: HTMLCanvasElement) {
+// `signal` stops the listening, so a finished game doesn't keep queueing clicks.
+export function getClickStream(
+  entityId: string,
+  canvas: HTMLCanvasElement,
+  signal?: AbortSignal
+) {
   const queue: Click[] = [];
   // Pointer events cover both mouse clicks and touch taps.
-  window.addEventListener("pointerdown", ({ clientX, clientY, target }) => {
-    if ((target as HTMLElement).closest(NOT_A_SHOT)) {
-      return;
-    }
-    // Measure the canvas at click time: the page layout shifts (setup panel
-    // hiding, status text changing, scrolling), so a position captured when
-    // the stream was created goes stale.
-    const rect = canvas.getBoundingClientRect();
-    const x = ((clientX - rect.left) * canvas.width) / rect.width;
-    const y = ((clientY - rect.top) * canvas.height) / rect.height;
-    queue.push({ entityId, x, y: canvas.height - y });
-  });
+  window.addEventListener(
+    "pointerdown",
+    ({ clientX, clientY, target }) => {
+      if ((target as HTMLElement).closest(NOT_A_SHOT)) {
+        return;
+      }
+      // Measure the canvas at click time: the page layout shifts (setup panel
+      // hiding, status text changing, scrolling), so a position captured when
+      // the stream was created goes stale.
+      const rect = canvas.getBoundingClientRect();
+      const x = ((clientX - rect.left) * canvas.width) / rect.width;
+      const y = ((clientY - rect.top) * canvas.height) / rect.height;
+      queue.push({ entityId, x, y: canvas.height - y });
+    },
+    { signal }
+  );
   return stream(() => queue.shift());
 }
 

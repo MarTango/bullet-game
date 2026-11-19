@@ -7,9 +7,7 @@ import { endSession, hasEnded, newConnection, onConnected } from "./session";
 import { Link } from "./lobby";
 import { waitForIce } from "./signaling";
 import { getRemoteClickStream, getRemoteInputStream } from "./streams";
-import { $, canvas, ctx, setStatus } from "./ui";
-
-let resetRequested = false;
+import { canvas, ctx, setStatus, watchReset } from "./ui";
 
 // Host: the player who sent the challenge. Opens the channels, offers the
 // connection and finishes it with the answer.
@@ -30,6 +28,7 @@ export async function hostGame(link: Link) {
   state.onclose = endSession;
   events.onclose = endSession;
 
+  const consumeReset = watchReset();
   let seq = 0;
   state.onopen = () => {
     onConnected(HOST);
@@ -44,16 +43,10 @@ export async function hostGame(link: Link) {
       },
       remoteInput: getRemoteInputStream(state),
       remoteClicks: getRemoteClickStream(events, GUEST),
-      consumeReset: () => {
-        const requested = resetRequested;
-        resetRequested = false;
-        return requested;
-      },
+      consumeReset,
       shouldStop: hasEnded,
     });
   };
-
-  $("reset").onclick = () => (resetRequested = true);
 
   await pc.setLocalDescription(await pc.createOffer());
   await waitForIce(pc);

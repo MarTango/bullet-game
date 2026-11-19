@@ -5,6 +5,7 @@
 import { joinGame } from "./guest";
 import { hostGame } from "./host";
 import { enterLobby, Lobby, Player } from "./lobby";
+import { stopPractice } from "./practice";
 import { cleanName, Direct, From } from "./signaling";
 import { $, guarded, setStatus, show } from "./ui";
 
@@ -164,6 +165,8 @@ export function initLobbyView() {
   }
 
   function startConnecting() {
+    stopPractice();
+    show("practice", false);
     connecting = true;
     lobby.setBusy(true);
     show("lobby", false);

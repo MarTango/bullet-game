@@ -51,6 +51,27 @@ export function newConnection() {
   return pc;
 }
 
+// Practising alone: the game controls show while the lobby stays usable.
+export function onPracticing() {
+  document.body.classList.add("playing");
+  show("reset");
+  if (isTouchDevice) {
+    show("stick");
+  }
+  setStatus(
+    isTouchDevice
+      ? "Practice: use the stick to move and tap the arena to shoot. Touching a bullet starts over."
+      : "Practice: move with WASD and click to shoot. Touching a bullet starts over."
+  );
+}
+
+export function onPracticeOver() {
+  setStick(0, 0);
+  document.body.classList.remove("playing");
+  show("reset", false);
+  show("stick", false);
+}
+
 // Both players are talking: hide the setup UI and show the game controls.
 export function onConnected(role: Role) {
   wasConnected = true;

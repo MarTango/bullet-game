@@ -11,13 +11,16 @@ import { Arena, Entity, Role, Score, State } from "./types";
 // Round logic, as pure functions. Randomness is passed in (`random` returns a
 // number in [0, 1), like Math.random) so results are reproducible.
 
-// A fresh round: both players at random heights on their own side.
-export function newRound(
-  arena: Arena,
-  score: Score,
-  random: () => number
-): State {
-  const player = (role: Role, x: number): Entity => ({
+// How a game starts and what happens after each frame. Versus is the real
+// game; practice is one player alone.
+export interface Rounds {
+  first: (random: () => number) => State;
+  after: (state: State, random: () => number) => State;
+}
+
+// A player at a random height, `x` across.
+function spawn(role: Role, x: number, arena: Arena, random: () => number): Entity {
+  return {
     id: role,
     x,
     y: random() * arena.height,
@@ -25,14 +28,21 @@ export function newRound(
     vx: 0,
     vy: 0,
     color: PLAYER_COLORS[role],
-  });
+  };
+}
 
+// A fresh round: both players at random heights on their own side.
+export function newRound(
+  arena: Arena,
+  score: Score,
+  random: () => number
+): State {
   return {
     arena,
     score,
     entities: [
-      player(HOST, arena.width / 8),
-      player(GUEST, (arena.width * 7) / 8),
+      spawn(HOST, arena.width / 8, arena, random),
+      spawn(GUEST, (arena.width * 7) / 8, arena, random),
     ],
   };
 }
@@ -58,3 +68,21 @@ export function afterRound(state: State, random: () => number): State {
     random
   );
 }
+
+export const versus: Rounds = { first: firstRound, after: afterRound };
+
+// Practice: one player and nobody to score against.
+export const practiceRound = (random: () => number): State => ({
+  arena: ARENA,
+  score: NO_SCORE,
+  entities: [spawn(HOST, ARENA.width / 2, ARENA, random)],
+});
+
+// Touching a bullet just starts over, with the bullets cleared.
+export const afterPracticeRound = (state: State, random: () => number): State =>
+  state.entities.some((e) => e.id == HOST) ? state : practiceRound(random);
+
+export const practice: Rounds = {
+  first: practiceRound,
+  after: afterPracticeRound,
+};

@@ -37,3 +37,15 @@ export function guarded(action: () => Promise<void>) {
     }
   };
 }
+
+// Wires the Reset button. Returns a function that says, once, whether it was
+// pressed since it was last asked.
+export function watchReset() {
+  let requested = false;
+  $("reset").onclick = () => (requested = true);
+  return () => {
+    const was = requested;
+    requested = false;
+    return was;
+  };
+}

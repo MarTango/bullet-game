@@ -23,8 +23,14 @@ function drawEntity(ctx: CanvasRenderingContext2D, e: Entity) {
   ctx.closePath();
 }
 
-export function display(ctx: CanvasRenderingContext2D, { entities, score }: Scene) {
+export function display(
+  ctx: CanvasRenderingContext2D,
+  { entities, score }: Scene,
+  showScore = true
+) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  drawScore(ctx, score);
+  if (showScore) {
+    drawScore(ctx, score);
+  }
   entities.forEach((e) => drawEntity(ctx, e));
 }

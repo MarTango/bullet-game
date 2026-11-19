@@ -10,6 +10,10 @@ Go to <https://martango.github.io/bullet-game> to play.
 Enter a name and click **Find players**. Everyone online is listed: click
 **Challenge** next to someone, and the game starts if they **Accept**.
 
+Waiting for someone? **Practice alone** gives you the arena to yourself, with
+no score. Touch a bullet and you start over. You stay in the lobby while you
+practise, so you can still be challenged.
+
 To play only with friends, share a link with your own lobby name, for example
 `https://martango.github.io/bullet-game/?lobby=my-friends`. Only people who open
 that link see each other.
@@ -49,7 +53,8 @@ or send messages on it. If it goes down, change `BROKER_URL` in
 | File | Role |
 |------|------|
 | `src/transformations.ts` | The game rules, as pure functions over a `Msg` |
-| `src/round.ts` | Starting rounds and scoring, as pure functions (randomness passed in) |
+| `src/round.ts` | Starting rounds and scoring (versus and practice), as pure functions (randomness passed in) |
+| `src/practice.ts` | Playing alone |
 | `src/game.ts` | Host game loop: the impure shell around the pure rules |
 | `src/render.ts` | Canvas drawing |
 | `src/streams.ts` | Per-frame input sources (keyboard, stick, clicks, network) |
